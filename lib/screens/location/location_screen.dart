@@ -1,6 +1,8 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:grocery_app/screens/login/mobile_login_screen.dart';
+import 'package:grocery_app/screens/main/main_screen.dart';
 
 import '../../bloc/location/location_bloc.dart';
 import '../../bloc/location/location_event.dart';
@@ -42,13 +44,21 @@ class _LocationScreenState
             if (state.status ==
                 LocationStatus.submitted) {
 
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(
-                  builder: (context) =>
-                  const MobileLoginScreen(),
-                ),
-              );
+              if (Navigator.canPop(context)) {
+                Navigator.pop(context);
+              } else {
+                final user = FirebaseAuth.instance.currentUser;
+                final isLoggedIn = user != null && user.emailVerified;
+
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => isLoggedIn
+                        ? const MainScreen()
+                        : const MobileLoginScreen(),
+                  ),
+                );
+              }
             }
 
 

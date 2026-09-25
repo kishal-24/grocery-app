@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:grocery_app/screens/location/location_screen.dart';
-
 import 'package:grocery_app/screens/login/mobile_login_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -11,25 +9,20 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController emailController =
-  TextEditingController();
-
-
-
-  @override
-  void dispose() {
-    emailController.dispose();
-    super.dispose();
-  }
-
-
-
   void loginWithGoogle() {
-
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Google Sign-In is coming soon. Please continue with email.'),
+      ),
+    );
   }
 
   void loginWithFacebook() {
-
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Facebook Sign-In is coming soon. Please continue with email.'),
+      ),
+    );
   }
 
   @override
@@ -87,7 +80,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => const LocationScreen(),
+                              builder: (context) => const MobileLoginScreen(),
                             ),
                           );
                         },

@@ -26,12 +26,15 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
 
       try {
         final userCredential = await authRepository.login(
-          email: event.email,
+          usernameOrEmail: event.usernameOrEmail,
           password: event.password,
         );
 
         // Refresh Firebase user information
-        await userCredential.user?.reload();
+        try {
+          await userCredential.user?.reload().timeout(const Duration(seconds: 4));
+          await userCredential.user?.getIdToken(true).timeout(const Duration(seconds: 4));
+        } catch (_) {}
 
         final user = FirebaseAuth.instance.currentUser;
 
@@ -84,6 +87,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         await authRepository.signup(
           email: event.email,
           password: event.password,
+          username: event.username,
         );
 
         emit(
@@ -240,7 +244,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
 
         emit(
           state.copyWith(
-            status: AuthStatus.success,
+            status: AuthStatus.passwordResetSent,
             errorMessage: null,
           ),
         );
@@ -275,7 +279,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         return 'Invalid email address.';
 
       case 'user-not-found':
-        return 'No account found with this email.';
+        return e.message ?? 'No account found with this username or email.';
 
       case 'wrong-password':
       case 'invalid-credential':

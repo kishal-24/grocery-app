@@ -1,30 +1,40 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:grocery_app/main.dart';
+import 'package:grocery_app/bloc/auth/auth_event.dart';
+import 'package:grocery_app/bloc/auth/auth_state.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  group('Auth Unit Tests', () {
+    test('AuthState defaults to initial status', () {
+      const state = AuthState();
+      expect(state.status, AuthStatus.initial);
+      expect(state.errorMessage, isNull);
+    });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    test('AuthState copyWith updates fields correctly', () {
+      const state = AuthState();
+      final updated = state.copyWith(
+        status: AuthStatus.loading,
+        errorMessage: 'Test error',
+      );
+      expect(updated.status, AuthStatus.loading);
+      expect(updated.errorMessage, 'Test error');
+    });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    test('LoginEvent creates with email and password', () {
+      const event = LoginEvent(email: 'test@example.com', password: 'password123');
+      expect(event.email, 'test@example.com');
+      expect(event.password, 'password123');
+    });
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    test('SignupEvent supports username, email, and password', () {
+      const event = SignupEvent(
+        email: 'test@example.com',
+        password: 'password123',
+        username: 'TestUser',
+      );
+      expect(event.email, 'test@example.com');
+      expect(event.password, 'password123');
+      expect(event.username, 'TestUser');
+    });
   });
 }

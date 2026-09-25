@@ -1,64 +1,60 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:grocery_app/screens/splash/splash_screens.dart';
 
-import 'bloc/auth/auth_bloc.dart';
-import 'bloc/location/location_bloc.dart';
+import 'firebase_options.dart';
 import 'data/repositories/auth_repository.dart';
 import 'data/repositories/location_repository.dart';
+import 'bloc/auth/auth_bloc.dart';
+import 'bloc/location/location_bloc.dart';
+import 'bloc/cart/cart_bloc.dart';
+import 'screens/splash/splash_screens.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Firebase BEFORE runApp()
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
-    return MultiBlocProvider(
+    return MultiRepositoryProvider(
       providers: [
-
-        BlocProvider(
-          create: (_) => AuthBloc(
-            authRepository: AuthRepository(),
-          ),
+        RepositoryProvider<AuthRepository>(
+          create: (_) => AuthRepository(),
         ),
-
-        BlocProvider(
-          create: (_) => LocationBloc(
-            locationRepository: LocationRepository(),
-          ),
+        RepositoryProvider<LocationRepository>(
+          create: (_) => LocationRepository(),
         ),
-
       ],
-
-      child: MaterialApp(
-
-      debugShowCheckedModeBanner: false,
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        textTheme: GoogleFonts.poppinsTextTheme(),
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-
-      ),
-      home: const SplashScreen()
+      child: MultiBlocProvider(
+        providers: [
+          BlocProvider<AuthBloc>(
+            create: (context) => AuthBloc(
+              authRepository: context.read<AuthRepository>(),
+            ),
+          ),
+          BlocProvider<LocationBloc>(
+            create: (context) => LocationBloc(
+              locationRepository: context.read<LocationRepository>(),
+            ),
+          ),
+          BlocProvider<CartBloc>(
+            create: (_) => CartBloc(),
+          ),
+        ],
+        child: const MaterialApp(
+          debugShowCheckedModeBanner: false,
+          home: SplashScreen(),
+        ),
       ),
     );
   }
