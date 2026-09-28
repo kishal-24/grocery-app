@@ -1,4 +1,7 @@
 import 'dart:convert';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -39,8 +42,9 @@ class AddressModel {
         'isDefault': isDefault,
       };
 
-  factory AddressModel.fromJson(Map<String, dynamic> json) => AddressModel(
-        id: json['id'] ?? '',
+  factory AddressModel.fromJson(Map<String, dynamic> json, [String? docId]) =>
+      AddressModel(
+        id: docId ?? json['id'] ?? '',
         title: json['title'] ?? 'Home',
         recipientName: json['recipientName'] ?? '',
         phone: json['phone'] ?? '',
@@ -109,9 +113,9 @@ class PaymentCardModel {
         'isDefault': isDefault,
       };
 
-  factory PaymentCardModel.fromJson(Map<String, dynamic> json) =>
+  factory PaymentCardModel.fromJson(Map<String, dynamic> json, [String? docId]) =>
       PaymentCardModel(
-        id: json['id'] ?? '',
+        id: docId ?? json['id'] ?? '',
         cardNumber: json['cardNumber'] ?? '',
         cardHolder: json['cardHolder'] ?? '',
         expiry: json['expiry'] ?? '',
@@ -203,17 +207,18 @@ class OrderModel {
         'paymentMethod': paymentMethod,
       };
 
-  factory OrderModel.fromJson(Map<String, dynamic> json) => OrderModel(
-        id: json['id'] ?? '',
+  factory OrderModel.fromJson(Map<String, dynamic> json, [String? docId]) =>
+      OrderModel(
+        id: docId ?? json['id'] ?? '',
         date: json['date'] ?? '',
         status: json['status'] ?? 'Delivered',
         items: (json['items'] as List<dynamic>?)
-                ?.map((e) => OrderItemModel.fromJson(e as Map<String, dynamic>))
+                ?.map((e) => OrderItemModel.fromJson(Map<String, dynamic>.from(e as Map)))
                 .toList() ??
             [],
         totalAmount: (json['totalAmount'] as num?)?.toDouble() ?? 0.0,
         deliveryAddress: json['deliveryAddress'] ?? 'Home Address',
-        paymentMethod: json['paymentMethod'] ?? 'Mastercard (ending 4242)',
+        paymentMethod: json['paymentMethod'] ?? 'Cash on Delivery',
       );
 
   OrderModel copyWith({
@@ -255,6 +260,27 @@ class PromoModel {
     required this.minSpend,
     required this.expiryDate,
   });
+
+  Map<String, dynamic> toJson() => {
+        'code': code,
+        'title': title,
+        'description': description,
+        'discountAmount': discountAmount,
+        'discountPercent': discountPercent,
+        'minSpend': minSpend,
+        'expiryDate': expiryDate,
+      };
+
+  factory PromoModel.fromJson(Map<String, dynamic> json, [String? docId]) =>
+      PromoModel(
+        code: docId ?? json['code'] ?? '',
+        title: json['title'] ?? '',
+        description: json['description'] ?? '',
+        discountAmount: (json['discountAmount'] as num?)?.toDouble() ?? 0.0,
+        discountPercent: (json['discountPercent'] as num?)?.toInt() ?? 0,
+        minSpend: (json['minSpend'] as num?)?.toDouble() ?? 0.0,
+        expiryDate: json['expiryDate'] ?? '',
+      );
 }
 
 class NotificationItemModel {
@@ -283,9 +309,10 @@ class NotificationItemModel {
         'type': type,
       };
 
-  factory NotificationItemModel.fromJson(Map<String, dynamic> json) =>
+  factory NotificationItemModel.fromJson(
+          Map<String, dynamic> json, [String? docId]) =>
       NotificationItemModel(
-        id: json['id'] ?? '',
+        id: docId ?? json['id'] ?? '',
         title: json['title'] ?? '',
         message: json['message'] ?? '',
         time: json['time'] ?? '',
@@ -315,6 +342,7 @@ class AccountStorageService {
   static const _keyUserGender = 'account_user_gender';
   static const _keyUserDob = 'account_user_dob';
   static const _keyUserAvatar = 'account_user_avatar';
+  static const _keyUserCustomImage = 'account_user_custom_image';
 
   // Notification toggles
   static const _keyNotifOrders = 'notif_orders';
@@ -322,10 +350,38 @@ class AccountStorageService {
   static const _keyNotifDelivery = 'notif_delivery';
   static const _keyNotifNewsletter = 'notif_newsletter';
 
+  // Saved Checkout Preferences
+  static const _keySavedCheckoutAddressId = 'checkout_saved_address_id';
+  static const _keySavedCheckoutSpeed = 'checkout_saved_speed';
+  static const _keySavedCheckoutPaymentMethod = 'checkout_saved_payment_method';
+  static const _keySavedCheckoutPaymentIconCode =
+      'checkout_saved_payment_icon_code';
+
   static final AccountStorageService _instance =
       AccountStorageService._internal();
   factory AccountStorageService() => _instance;
   AccountStorageService._internal();
+
+  bool get _isFirebaseReady {
+    try {
+      return Firebase.apps.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  FirebaseFirestore? _customFirestore;
+  FirebaseFirestore get _firestore =>
+      _customFirestore ?? FirebaseFirestore.instance;
+
+  User? get _currentUser {
+    if (!_isFirebaseReady) return null;
+    try {
+      return FirebaseAuth.instance.currentUser;
+    } catch (_) {
+      return null;
+    }
+  }
 
   // ValueNotifier so UI can reactively update when profile changes
   final ValueNotifier<int> profileUpdateNotifier = ValueNotifier<int>(0);
@@ -337,13 +393,53 @@ class AccountStorageService {
   // ==================== USER PROFILE ====================
 
   Future<Map<String, String>> getUserProfile() async {
+    final user = _currentUser;
     final prefs = await SharedPreferences.getInstance();
+
+    if (user != null) {
+      try {
+        final doc = await _firestore.collection('users').doc(user.uid).get();
+        if (doc.exists && doc.data() != null) {
+          final data = doc.data()!;
+          final profile = {
+            'name': (data['name'] as String?)?.isNotEmpty == true
+                ? data['name'] as String
+                : (user.displayName ?? ''),
+            'email': (data['email'] as String?) ?? (user.email ?? ''),
+            'phone': (data['phone'] as String?) ??
+                (user.phoneNumber ?? '+1 234 567 8900'),
+            'gender': (data['gender'] as String?) ?? 'Prefer not to say',
+            'dob': (data['dob'] as String?) ?? '15 May 1995',
+            'avatar': (data['avatar'] as String?) ?? '0',
+            'customImage': (data['customImage'] as String?) ?? '',
+          };
+
+          // Cache locally
+          if (profile['name']!.isNotEmpty) {
+            await prefs.setString(_keyUserName, profile['name']!);
+          }
+          await prefs.setString(_keyUserPhone, profile['phone']!);
+          await prefs.setString(_keyUserGender, profile['gender']!);
+          await prefs.setString(_keyUserDob, profile['dob']!);
+          await prefs.setString(_keyUserAvatar, profile['avatar']!);
+          if (profile['customImage']!.isNotEmpty) {
+            await prefs.setString(_keyUserCustomImage, profile['customImage']!);
+          }
+
+          return profile;
+        }
+      } catch (_) {}
+    }
+
     return {
-      'name': prefs.getString(_keyUserName) ?? '',
-      'phone': prefs.getString(_keyUserPhone) ?? '+1 234 567 8900',
+      'name': prefs.getString(_keyUserName) ?? (user?.displayName ?? ''),
+      'email': user?.email ?? '',
+      'phone': prefs.getString(_keyUserPhone) ??
+          (user?.phoneNumber ?? '+1 234 567 8900'),
       'gender': prefs.getString(_keyUserGender) ?? 'Prefer not to say',
       'dob': prefs.getString(_keyUserDob) ?? '15 May 1995',
       'avatar': prefs.getString(_keyUserAvatar) ?? '0',
+      'customImage': prefs.getString(_keyUserCustomImage) ?? '',
     };
   }
 
@@ -353,52 +449,144 @@ class AccountStorageService {
     String? gender,
     String? dob,
     String? avatar,
+    String? customImage,
+    bool clearCustomImage = false,
   }) async {
+    final user = _currentUser;
     final prefs = await SharedPreferences.getInstance();
-    if (name != null) await prefs.setString(_keyUserName, name);
-    if (phone != null) await prefs.setString(_keyUserPhone, phone);
-    if (gender != null) await prefs.setString(_keyUserGender, gender);
-    if (dob != null) await prefs.setString(_keyUserDob, dob);
-    if (avatar != null) await prefs.setString(_keyUserAvatar, avatar);
+
+    final Map<String, dynamic> firestoreUpdates = {
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+
+    if (name != null) {
+      await prefs.setString(_keyUserName, name);
+      firestoreUpdates['name'] = name;
+      try {
+        await user?.updateDisplayName(name);
+      } catch (_) {}
+    }
+    if (phone != null) {
+      await prefs.setString(_keyUserPhone, phone);
+      firestoreUpdates['phone'] = phone;
+    }
+    if (gender != null) {
+      await prefs.setString(_keyUserGender, gender);
+      firestoreUpdates['gender'] = gender;
+    }
+    if (dob != null) {
+      await prefs.setString(_keyUserDob, dob);
+      firestoreUpdates['dob'] = dob;
+    }
+    if (avatar != null) {
+      await prefs.setString(_keyUserAvatar, avatar);
+      firestoreUpdates['avatar'] = avatar;
+    }
+    if (clearCustomImage || customImage == '') {
+      await prefs.remove(_keyUserCustomImage);
+      firestoreUpdates['customImage'] = '';
+    } else if (customImage != null) {
+      await prefs.setString(_keyUserCustomImage, customImage);
+      firestoreUpdates['customImage'] = customImage;
+    }
+
+    if (user != null) {
+      try {
+        await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .set(firestoreUpdates, SetOptions(merge: true));
+      } catch (_) {}
+    }
+
     notifyProfileChanged();
   }
 
   // ==================== ADDRESSES ====================
 
   Future<List<AddressModel>> getAddresses() async {
+    final user = _currentUser;
+    if (user != null) {
+      try {
+        final snap = await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('addresses')
+            .get();
+
+        if (snap.docs.isNotEmpty) {
+          final list = snap.docs
+              .map((d) => AddressModel.fromJson(d.data(), d.id))
+              .toList();
+          list.sort((a, b) =>
+              (b.isDefault ? 1 : 0).compareTo(a.isDefault ? 1 : 0));
+          await saveAddressesLocally(list);
+          return list;
+        }
+      } catch (_) {}
+    }
+
     final prefs = await SharedPreferences.getInstance();
     final jsonStr = prefs.getString(_keyAddresses);
-    if (jsonStr == null || jsonStr.isEmpty) {
-      final initial = _defaultAddresses;
-      await saveAddresses(initial);
-      return initial;
+    if (jsonStr != null && jsonStr.isNotEmpty) {
+      try {
+        final list = (jsonDecode(jsonStr) as List<dynamic>)
+            .map((e) => AddressModel.fromJson(e as Map<String, dynamic>))
+            .toList();
+        return list;
+      } catch (_) {}
     }
-    try {
-      final list = jsonDecode(jsonStr) as List<dynamic>;
-      return list.map((e) => AddressModel.fromJson(e)).toList();
-    } catch (_) {
-      return _defaultAddresses;
-    }
+
+    return [];
   }
 
-  Future<void> saveAddresses(List<AddressModel> addresses) async {
+  Future<void> saveAddressesLocally(List<AddressModel> addresses) async {
     final prefs = await SharedPreferences.getInstance();
     final jsonStr = jsonEncode(addresses.map((e) => e.toJson()).toList());
     await prefs.setString(_keyAddresses, jsonStr);
   }
 
   Future<void> addAddress(AddressModel address) async {
+    final user = _currentUser;
     final list = await getAddresses();
+
     if (address.isDefault) {
       for (var i = 0; i < list.length; i++) {
         list[i] = list[i].copyWith(isDefault: false);
       }
     }
     list.insert(0, address);
-    await saveAddresses(list);
+    await saveAddressesLocally(list);
+
+    if (user != null) {
+      try {
+        final batch = _firestore.batch();
+        final addrRef = _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('addresses');
+
+        if (address.isDefault) {
+          for (final existing in list) {
+            if (existing.id != address.id) {
+              batch.set(addrRef.doc(existing.id), {'isDefault': false},
+                  SetOptions(merge: true));
+            }
+          }
+        }
+
+        batch.set(addrRef.doc(address.id), {
+          ...address.toJson(),
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+
+        await batch.commit();
+      } catch (_) {}
+    }
   }
 
   Future<void> updateAddress(AddressModel updated) async {
+    final user = _currentUser;
     final list = await getAddresses();
     final index = list.indexWhere((e) => e.id == updated.id);
     if (index != -1) {
@@ -408,77 +596,125 @@ class AccountStorageService {
         }
       }
       list[index] = updated;
-      await saveAddresses(list);
+      await saveAddressesLocally(list);
+    }
+
+    if (user != null) {
+      try {
+        final batch = _firestore.batch();
+        final addrRef = _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('addresses');
+
+        if (updated.isDefault) {
+          for (final a in list) {
+            if (a.id != updated.id) {
+              batch.set(addrRef.doc(a.id), {'isDefault': false},
+                  SetOptions(merge: true));
+            }
+          }
+        }
+
+        batch.set(
+            addrRef.doc(updated.id), updated.toJson(), SetOptions(merge: true));
+        await batch.commit();
+      } catch (_) {}
     }
   }
 
   Future<void> deleteAddress(String id) async {
+    final user = _currentUser;
     final list = await getAddresses();
     list.removeWhere((e) => e.id == id);
     if (list.isNotEmpty && !list.any((e) => e.isDefault)) {
       list[0] = list[0].copyWith(isDefault: true);
     }
-    await saveAddresses(list);
+    await saveAddressesLocally(list);
+
+    if (user != null) {
+      try {
+        await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('addresses')
+            .doc(id)
+            .delete();
+      } catch (_) {}
+    }
   }
 
   Future<void> setDefaultAddress(String id) async {
+    final user = _currentUser;
     final list = await getAddresses();
     for (var i = 0; i < list.length; i++) {
       list[i] = list[i].copyWith(isDefault: list[i].id == id);
     }
-    await saveAddresses(list);
-  }
+    await saveAddressesLocally(list);
 
-  static final List<AddressModel> _defaultAddresses = [
-    AddressModel(
-      id: 'addr_1',
-      title: 'Home',
-      recipientName: 'Alex Johnson',
-      phone: '+1 (555) 234-5678',
-      street: '742 Evergreen Terrace',
-      city: 'Springfield',
-      state: 'OR',
-      zipCode: '97477',
-      isDefault: true,
-    ),
-    AddressModel(
-      id: 'addr_2',
-      title: 'Work / Office',
-      recipientName: 'Alex Johnson',
-      phone: '+1 (555) 987-6543',
-      street: '100 Innovation Way, Suite 400',
-      city: 'Portland',
-      state: 'OR',
-      zipCode: '97201',
-      isDefault: false,
-    ),
-  ];
+    if (user != null) {
+      try {
+        final batch = _firestore.batch();
+        final addrRef = _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('addresses');
+
+        for (final a in list) {
+          batch.set(addrRef.doc(a.id), {'isDefault': a.id == id},
+              SetOptions(merge: true));
+        }
+        await batch.commit();
+      } catch (_) {}
+    }
+  }
 
   // ==================== PAYMENT METHODS ====================
 
   Future<List<PaymentCardModel>> getCards() async {
+    final user = _currentUser;
+    if (user != null) {
+      try {
+        final snap = await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('cards')
+            .get();
+
+        if (snap.docs.isNotEmpty) {
+          final list = snap.docs
+              .map((d) => PaymentCardModel.fromJson(d.data(), d.id))
+              .toList();
+          list.sort((a, b) =>
+              (b.isDefault ? 1 : 0).compareTo(a.isDefault ? 1 : 0));
+          await saveCardsLocally(list);
+          return list;
+        }
+      } catch (_) {}
+    }
+
     final prefs = await SharedPreferences.getInstance();
     final jsonStr = prefs.getString(_keyCards);
-    if (jsonStr == null || jsonStr.isEmpty) {
-      final initial = _defaultCards;
-      await saveCards(initial);
-      return initial;
+    if (jsonStr != null && jsonStr.isNotEmpty) {
+      try {
+        final list = (jsonDecode(jsonStr) as List<dynamic>)
+            .map((e) => PaymentCardModel.fromJson(e as Map<String, dynamic>))
+            .toList();
+        return list;
+      } catch (_) {}
     }
-    try {
-      final list = jsonDecode(jsonStr) as List<dynamic>;
-      return list.map((e) => PaymentCardModel.fromJson(e)).toList();
-    } catch (_) {
-      return _defaultCards;
-    }
+
+    return [];
   }
 
-  Future<void> saveCards(List<PaymentCardModel> cards) async {
+  Future<void> saveCardsLocally(List<PaymentCardModel> cards) async {
     final prefs = await SharedPreferences.getInstance();
     final jsonStr = jsonEncode(cards.map((e) => e.toJson()).toList());
     await prefs.setString(_keyCards, jsonStr);
   }
 
   Future<void> addCard(PaymentCardModel card) async {
+    final user = _currentUser;
     final list = await getCards();
     if (card.isDefault) {
       for (var i = 0; i < list.length; i++) {
@@ -486,299 +722,433 @@ class AccountStorageService {
       }
     }
     list.insert(0, card);
-    await saveCards(list);
+    await saveCardsLocally(list);
+
+    if (user != null) {
+      try {
+        final batch = _firestore.batch();
+        final cardRef = _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('cards');
+
+        if (card.isDefault) {
+          for (final existing in list) {
+            if (existing.id != card.id) {
+              batch.set(cardRef.doc(existing.id), {'isDefault': false},
+                  SetOptions(merge: true));
+            }
+          }
+        }
+
+        batch.set(cardRef.doc(card.id), {
+          ...card.toJson(),
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+        await batch.commit();
+      } catch (_) {}
+    }
   }
 
   Future<void> deleteCard(String id) async {
+    final user = _currentUser;
     final list = await getCards();
     list.removeWhere((e) => e.id == id);
     if (list.isNotEmpty && !list.any((e) => e.isDefault)) {
       list[0] = list[0].copyWith(isDefault: true);
     }
-    await saveCards(list);
+    await saveCardsLocally(list);
+
+    if (user != null) {
+      try {
+        await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('cards')
+            .doc(id)
+            .delete();
+      } catch (_) {}
+    }
   }
 
   Future<void> setDefaultCard(String id) async {
+    final user = _currentUser;
     final list = await getCards();
     for (var i = 0; i < list.length; i++) {
       list[i] = list[i].copyWith(isDefault: list[i].id == id);
     }
-    await saveCards(list);
-  }
+    await saveCardsLocally(list);
 
-  static final List<PaymentCardModel> _defaultCards = [
-    PaymentCardModel(
-      id: 'card_1',
-      cardNumber: '5412 7534 8921 4242',
-      cardHolder: 'ALEX JOHNSON',
-      expiry: '12/28',
-      cardType: 'Mastercard',
-      isDefault: true,
-    ),
-    PaymentCardModel(
-      id: 'card_2',
-      cardNumber: '4242 4242 4242 8891',
-      cardHolder: 'ALEX JOHNSON',
-      expiry: '08/27',
-      cardType: 'Visa',
-      isDefault: false,
-    ),
-  ];
+    if (user != null) {
+      try {
+        final batch = _firestore.batch();
+        final cardRef = _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('cards');
+
+        for (final c in list) {
+          batch.set(cardRef.doc(c.id), {'isDefault': c.id == id},
+              SetOptions(merge: true));
+        }
+        await batch.commit();
+      } catch (_) {}
+    }
+  }
 
   // ==================== ORDERS ====================
 
   Future<List<OrderModel>> getOrders() async {
+    final user = _currentUser;
+    if (user != null) {
+      try {
+        final snap = await _firestore
+            .collection('orders')
+            .where('userId', isEqualTo: user.uid)
+            .get();
+
+        if (snap.docs.isNotEmpty) {
+          final orders = snap.docs
+              .map((d) => OrderModel.fromJson(d.data(), d.id))
+              .toList();
+          await saveOrdersLocally(orders);
+          return orders;
+        }
+
+        // Also check user subcollection fallback
+        final subSnap = await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('orders')
+            .get();
+
+        if (subSnap.docs.isNotEmpty) {
+          final orders = subSnap.docs
+              .map((d) => OrderModel.fromJson(d.data(), d.id))
+              .toList();
+          await saveOrdersLocally(orders);
+          return orders;
+        }
+      } catch (_) {}
+    }
+
     final prefs = await SharedPreferences.getInstance();
     final jsonStr = prefs.getString(_keyOrders);
-    if (jsonStr == null || jsonStr.isEmpty) {
-      final initial = _defaultOrders;
-      await saveOrders(initial);
-      return initial;
+    if (jsonStr != null && jsonStr.isNotEmpty) {
+      try {
+        return (jsonDecode(jsonStr) as List<dynamic>)
+            .map((e) => OrderModel.fromJson(e as Map<String, dynamic>))
+            .toList();
+      } catch (_) {}
     }
-    try {
-      final list = jsonDecode(jsonStr) as List<dynamic>;
-      return list.map((e) => OrderModel.fromJson(e)).toList();
-    } catch (_) {
-      return _defaultOrders;
-    }
+
+    return [];
   }
 
-  Future<void> saveOrders(List<OrderModel> orders) async {
+  Future<void> saveOrdersLocally(List<OrderModel> orders) async {
     final prefs = await SharedPreferences.getInstance();
     final jsonStr = jsonEncode(orders.map((e) => e.toJson()).toList());
     await prefs.setString(_keyOrders, jsonStr);
   }
 
   Future<void> addOrder(OrderModel order) async {
+    final user = _currentUser;
     final list = await getOrders();
     list.insert(0, order);
-    await saveOrders(list);
+    await saveOrdersLocally(list);
+
+    if (user != null) {
+      try {
+        final orderData = {
+          ...order.toJson(),
+          'userId': user.uid,
+          'createdAt': FieldValue.serverTimestamp(),
+        };
+
+        // Write to root 'orders' collection
+        await _firestore.collection('orders').doc(order.id).set(orderData);
+
+        // Also write to user subcollection
+        await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('orders')
+            .doc(order.id)
+            .set(orderData);
+
+        // Automatically trigger an in-app notification in Firestore
+        final notif = NotificationItemModel(
+          id: 'notif_${DateTime.now().millisecondsSinceEpoch}',
+          title: 'Order Placed Successfully! 🎉',
+          message:
+              'Your order #${order.id} for \$${order.totalAmount.toStringAsFixed(2)} has been placed and is being prepared.',
+          time: 'Just now',
+          isRead: false,
+          type: 'order',
+        );
+        await addNotification(notif);
+      } catch (_) {}
+    }
   }
 
   Future<void> cancelOrder(String id) async {
+    final user = _currentUser;
     final list = await getOrders();
     final index = list.indexWhere((e) => e.id == id);
     if (index != -1) {
       list[index] = list[index].copyWith(status: 'Cancelled');
-      await saveOrders(list);
+      await saveOrdersLocally(list);
+    }
+
+    if (user != null) {
+      try {
+        await _firestore
+            .collection('orders')
+            .doc(id)
+            .set({'status': 'Cancelled'}, SetOptions(merge: true));
+
+        await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('orders')
+            .doc(id)
+            .set({'status': 'Cancelled'}, SetOptions(merge: true));
+
+        // Create cancellation notification
+        final notif = NotificationItemModel(
+          id: 'notif_${DateTime.now().millisecondsSinceEpoch}',
+          title: 'Order Cancelled 🚫',
+          message: 'Order #$id has been cancelled.',
+          time: 'Just now',
+          isRead: false,
+          type: 'order',
+        );
+        await addNotification(notif);
+      } catch (_) {}
     }
   }
 
-  static final List<OrderModel> _defaultOrders = [
-    OrderModel(
-      id: 'ORD-89241',
-      date: 'Today, 11:30 AM',
-      status: 'In Transit',
-      deliveryAddress: '742 Evergreen Terrace, Springfield',
-      paymentMethod: 'Mastercard ending in 4242',
-      totalAmount: 18.96,
-      items: [
-        OrderItemModel(
-          id: 'p_1',
-          name: 'Organic Bananas',
-          price: 4.99,
-          quantity: 2,
-          image:
-              'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?w=400',
-          unit: '7pcs, Priceg',
-        ),
-        OrderItemModel(
-          id: 'p_2',
-          name: 'Red Apple',
-          price: 4.99,
-          quantity: 1,
-          image:
-              'https://images.unsplash.com/photo-1560806887-1e4cd0b6cbd6?w=400',
-          unit: '1kg, Priceg',
-        ),
-        OrderItemModel(
-          id: 'p_3',
-          name: 'Bell Pepper Red',
-          price: 2.99,
-          quantity: 1,
-          image:
-              'https://images.unsplash.com/photo-1563565375-f3fdfdbefa83?w=400',
-          unit: '1kg, Priceg',
-        ),
-      ],
-    ),
-    OrderModel(
-      id: 'ORD-76318',
-      date: 'Yesterday, 04:15 PM',
-      status: 'Delivered',
-      deliveryAddress: '742 Evergreen Terrace, Springfield',
-      paymentMethod: 'Visa ending in 8891',
-      totalAmount: 26.97,
-      items: [
-        OrderItemModel(
-          id: 'p_6',
-          name: 'Broiler Chicken',
-          price: 5.49,
-          quantity: 2,
-          image:
-              'https://images.unsplash.com/photo-1587593810167-a84920ea0781?w=400',
-          unit: '1kg, Priceg',
-        ),
-        OrderItemModel(
-          id: 'p_9',
-          name: 'Apple & Grape Juice',
-          price: 15.99,
-          quantity: 1,
-          image:
-              'https://images.unsplash.com/photo-1556881286-fc6915169721?w=400',
-          unit: '2L, Price',
-        ),
-      ],
-    ),
-    OrderModel(
-      id: 'ORD-65120',
-      date: '20 Sep 2026, 02:40 PM',
-      status: 'Delivered',
-      deliveryAddress: '100 Innovation Way, Suite 400',
-      paymentMethod: 'Mastercard ending in 4242',
-      totalAmount: 11.47,
-      items: [
-        OrderItemModel(
-          id: 'p_10',
-          name: 'Fresh Farm Eggs',
-          price: 3.49,
-          quantity: 1,
-          image:
-              'https://images.unsplash.com/photo-1506976785307-8732e854ad03?w=400',
-          unit: '12pcs, Price',
-        ),
-        OrderItemModel(
-          id: 'p_5',
-          name: 'Beef Bone',
-          price: 7.99,
-          quantity: 1,
-          image:
-              'https://images.unsplash.com/photo-1588168333986-5078d3ae3976?w=400',
-          unit: '1kg, Priceg',
-        ),
-      ],
-    ),
-  ];
-
   // ==================== PROMO CARDS ====================
 
+  List<PromoModel> _cachedPromos = [];
+
   List<PromoModel> getPromos() {
-    return [
-      PromoModel(
-        code: 'FRESH20',
-        title: '20% OFF Fresh Produce',
-        description: 'Get 20% off on all organic vegetables and fresh fruits.',
-        discountPercent: 20,
-        minSpend: 25.0,
-        expiryDate: '30 Oct 2026',
-      ),
-      PromoModel(
-        code: 'WELCOME10',
-        title: '\$10 OFF First Order',
-        description: 'Enjoy \$10 discount on your grocery haul over \$40.',
-        discountAmount: 10.0,
-        minSpend: 40.0,
-        expiryDate: '15 Nov 2026',
-      ),
-      PromoModel(
-        code: 'FREEDEL',
-        title: 'Free Express Delivery',
-        description: 'Free instant contactless delivery on any order today.',
-        discountAmount: 5.0,
-        minSpend: 20.0,
-        expiryDate: '01 Nov 2026',
-      ),
-      PromoModel(
-        code: 'HEALTHY15',
-        title: '15% OFF Dairy & Eggs',
-        description: 'Save 15% on dairy, artisan bakery and pasture-raised eggs.',
-        discountPercent: 15,
-        minSpend: 30.0,
-        expiryDate: '25 Nov 2026',
-      ),
-    ];
+    if (_cachedPromos.isNotEmpty) {
+      return _cachedPromos;
+    }
+    // Fetch in background to populate cache
+    fetchPromos();
+    return _defaultPromos;
   }
+
+  Future<List<PromoModel>> fetchPromos() async {
+    if (!_isFirebaseReady) {
+      return _cachedPromos.isNotEmpty ? _cachedPromos : _defaultPromos;
+    }
+    try {
+      final snap = await _firestore.collection('promos').get();
+      if (snap.docs.isNotEmpty) {
+        _cachedPromos = snap.docs
+            .map((d) => PromoModel.fromJson(d.data(), d.id))
+            .toList();
+        return _cachedPromos;
+      }
+
+      // If empty in Firestore, seed and return defaults
+      for (final p in _defaultPromos) {
+        await _firestore.collection('promos').doc(p.code).set(p.toJson());
+      }
+      _cachedPromos = List.from(_defaultPromos);
+      return _cachedPromos;
+    } catch (_) {
+      return _cachedPromos.isNotEmpty ? _cachedPromos : _defaultPromos;
+    }
+  }
+
+  static final List<PromoModel> _defaultPromos = [
+    PromoModel(
+      code: 'FRESH20',
+      title: '20% OFF Fresh Produce',
+      description: 'Get 20% off on all organic vegetables and fresh fruits.',
+      discountPercent: 20,
+      minSpend: 25.0,
+      expiryDate: '30 Oct 2026',
+    ),
+    PromoModel(
+      code: 'WELCOME10',
+      title: '\$10 OFF First Order',
+      description: 'Enjoy \$10 discount on your grocery haul over \$40.',
+      discountAmount: 10.0,
+      minSpend: 40.0,
+      expiryDate: '15 Nov 2026',
+    ),
+    PromoModel(
+      code: 'FREEDEL',
+      title: 'Free Express Delivery',
+      description: 'Free instant contactless delivery on any order today.',
+      discountAmount: 5.0,
+      minSpend: 20.0,
+      expiryDate: '01 Nov 2026',
+    ),
+    PromoModel(
+      code: 'HEALTHY15',
+      title: '15% OFF Dairy & Eggs',
+      description:
+          'Save 15% on dairy, artisan bakery and pasture-raised eggs.',
+      discountPercent: 15,
+      minSpend: 30.0,
+      expiryDate: '25 Nov 2026',
+    ),
+  ];
 
   // ==================== NOTIFICATIONS ====================
 
   Future<List<NotificationItemModel>> getNotifications() async {
+    final user = _currentUser;
+    if (user != null) {
+      try {
+        final snap = await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('notifications')
+            .get();
+
+        if (snap.docs.isNotEmpty) {
+          final list = snap.docs
+              .map((d) => NotificationItemModel.fromJson(d.data(), d.id))
+              .toList();
+          await saveNotificationsLocally(list);
+          return list;
+        }
+      } catch (_) {}
+    }
+
     final prefs = await SharedPreferences.getInstance();
     final jsonStr = prefs.getString(_keyNotifications);
-    if (jsonStr == null || jsonStr.isEmpty) {
-      final initial = _defaultNotifications;
-      await saveNotifications(initial);
-      return initial;
+    if (jsonStr != null && jsonStr.isNotEmpty) {
+      try {
+        return (jsonDecode(jsonStr) as List<dynamic>)
+            .map((e) =>
+                NotificationItemModel.fromJson(e as Map<String, dynamic>))
+            .toList();
+      } catch (_) {}
     }
-    try {
-      final list = jsonDecode(jsonStr) as List<dynamic>;
-      return list.map((e) => NotificationItemModel.fromJson(e)).toList();
-    } catch (_) {
-      return _defaultNotifications;
-    }
+
+    return [];
   }
 
-  Future<void> saveNotifications(List<NotificationItemModel> items) async {
+  Future<void> saveNotificationsLocally(
+      List<NotificationItemModel> items) async {
     final prefs = await SharedPreferences.getInstance();
     final jsonStr = jsonEncode(items.map((e) => e.toJson()).toList());
     await prefs.setString(_keyNotifications, jsonStr);
   }
 
+  Future<void> addNotification(NotificationItemModel item) async {
+    final user = _currentUser;
+    final list = await getNotifications();
+    list.insert(0, item);
+    await saveNotificationsLocally(list);
+
+    if (user != null) {
+      try {
+        await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('notifications')
+            .doc(item.id)
+            .set({
+          ...item.toJson(),
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      } catch (_) {}
+    }
+  }
+
   Future<void> markNotificationAsRead(String id) async {
+    final user = _currentUser;
     final list = await getNotifications();
     final index = list.indexWhere((e) => e.id == id);
     if (index != -1) {
       list[index] = list[index].copyWith(isRead: true);
-      await saveNotifications(list);
+      await saveNotificationsLocally(list);
+    }
+
+    if (user != null) {
+      try {
+        await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('notifications')
+            .doc(id)
+            .set({'isRead': true}, SetOptions(merge: true));
+      } catch (_) {}
     }
   }
 
   Future<void> markAllNotificationsAsRead() async {
+    final user = _currentUser;
     final list = await getNotifications();
     final updated = list.map((e) => e.copyWith(isRead: true)).toList();
-    await saveNotifications(updated);
+    await saveNotificationsLocally(updated);
+
+    if (user != null) {
+      try {
+        final batch = _firestore.batch();
+        final ref = _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('notifications');
+
+        for (final notif in updated) {
+          batch.set(ref.doc(notif.id), {'isRead': true},
+              SetOptions(merge: true));
+        }
+        await batch.commit();
+      } catch (_) {}
+    }
   }
 
   Future<void> clearAllNotifications() async {
-    await saveNotifications([]);
+    final user = _currentUser;
+    await saveNotificationsLocally([]);
+
+    if (user != null) {
+      try {
+        final snap = await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('notifications')
+            .get();
+
+        final batch = _firestore.batch();
+        for (final doc in snap.docs) {
+          batch.delete(doc.reference);
+        }
+        await batch.commit();
+      } catch (_) {}
+    }
   }
 
-  static final List<NotificationItemModel> _defaultNotifications = [
-    NotificationItemModel(
-      id: 'notif_1',
-      title: 'Order Out for Delivery 🚚',
-      message: 'Your order #ORD-89241 is on its way with driver David. Estimated arrival: 25 mins.',
-      time: '15 mins ago',
-      isRead: false,
-      type: 'delivery',
-    ),
-    NotificationItemModel(
-      id: 'notif_2',
-      title: 'Special Weekend Discount! 🥑',
-      message: 'Get 20% off on all organic vegetables with code FRESH20 this weekend.',
-      time: '2 hours ago',
-      isRead: false,
-      type: 'promo',
-    ),
-    NotificationItemModel(
-      id: 'notif_3',
-      title: 'Order Delivered Successfully ✅',
-      message: 'Order #ORD-76318 was delivered at your front door. Thanks for shopping with us!',
-      time: 'Yesterday',
-      isRead: true,
-      type: 'order',
-    ),
-    NotificationItemModel(
-      id: 'notif_4',
-      title: 'Welcome to Fresh Basket! 🎉',
-      message: 'We are thrilled to have you here. Explore our daily harvested produce and quick delivery.',
-      time: '3 days ago',
-      isRead: true,
-      type: 'system',
-    ),
-  ];
+  // ==================== NOTIFICATION SETTINGS ====================
 
-  // Notification Preferences
   Future<Map<String, bool>> getNotificationSettings() async {
+    final user = _currentUser;
+    if (user != null) {
+      try {
+        final doc = await _firestore.collection('users').doc(user.uid).get();
+        if (doc.exists && doc.data()?['notifSettings'] != null) {
+          final s = Map<String, dynamic>.from(doc.data()!['notifSettings']);
+          return {
+            'orders': s['orders'] as bool? ?? true,
+            'promos': s['promos'] as bool? ?? true,
+            'delivery': s['delivery'] as bool? ?? true,
+            'newsletter': s['newsletter'] as bool? ?? false,
+          };
+        }
+      } catch (_) {}
+    }
+
     final prefs = await SharedPreferences.getInstance();
     return {
       'orders': prefs.getBool(_keyNotifOrders) ?? true,
@@ -789,10 +1159,86 @@ class AccountStorageService {
   }
 
   Future<void> setNotificationSetting(String key, bool value) async {
+    final user = _currentUser;
     final prefs = await SharedPreferences.getInstance();
     if (key == 'orders') await prefs.setBool(_keyNotifOrders, value);
     if (key == 'promos') await prefs.setBool(_keyNotifPromos, value);
     if (key == 'delivery') await prefs.setBool(_keyNotifDelivery, value);
     if (key == 'newsletter') await prefs.setBool(_keyNotifNewsletter, value);
+
+    if (user != null) {
+      try {
+        await _firestore.collection('users').doc(user.uid).set({
+          'notifSettings': {
+            key: value,
+          },
+        }, SetOptions(merge: true));
+      } catch (_) {}
+    }
+  }
+
+  // ==================== CHECKOUT PREFERENCES ====================
+
+  Future<void> saveCheckoutPreferences({
+    String? addressId,
+    String? deliverySpeed,
+    String? paymentMethod,
+    int? paymentIconCode,
+  }) async {
+    final user = _currentUser;
+    final prefs = await SharedPreferences.getInstance();
+    final Map<String, dynamic> updates = {};
+
+    if (addressId != null) {
+      await prefs.setString(_keySavedCheckoutAddressId, addressId);
+      updates['addressId'] = addressId;
+    }
+    if (deliverySpeed != null) {
+      await prefs.setString(_keySavedCheckoutSpeed, deliverySpeed);
+      updates['deliverySpeed'] = deliverySpeed;
+    }
+    if (paymentMethod != null) {
+      await prefs.setString(_keySavedCheckoutPaymentMethod, paymentMethod);
+      updates['paymentMethod'] = paymentMethod;
+    }
+    if (paymentIconCode != null) {
+      await prefs.setInt(_keySavedCheckoutPaymentIconCode, paymentIconCode);
+      updates['paymentIconCode'] = paymentIconCode;
+    }
+
+    if (user != null && updates.isNotEmpty) {
+      try {
+        await _firestore.collection('users').doc(user.uid).set({
+          'checkoutPreferences': updates,
+        }, SetOptions(merge: true));
+      } catch (_) {}
+    }
+  }
+
+  Future<Map<String, dynamic>> getSavedCheckoutPreferences() async {
+    final user = _currentUser;
+    if (user != null) {
+      try {
+        final doc = await _firestore.collection('users').doc(user.uid).get();
+        if (doc.exists && doc.data()?['checkoutPreferences'] != null) {
+          final cp =
+              Map<String, dynamic>.from(doc.data()!['checkoutPreferences']);
+          return {
+            'addressId': cp['addressId'] as String?,
+            'deliverySpeed': cp['deliverySpeed'] as String?,
+            'paymentMethod': cp['paymentMethod'] as String?,
+            'paymentIconCode': cp['paymentIconCode'] as int?,
+          };
+        }
+      } catch (_) {}
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    return {
+      'addressId': prefs.getString(_keySavedCheckoutAddressId),
+      'deliverySpeed': prefs.getString(_keySavedCheckoutSpeed),
+      'paymentMethod': prefs.getString(_keySavedCheckoutPaymentMethod),
+      'paymentIconCode': prefs.getInt(_keySavedCheckoutPaymentIconCode),
+    };
   }
 }

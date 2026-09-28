@@ -1,1 +1,29 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"grocery-db70e","appId":"1:1071023352462:android:94cf7d0a6fe03534c637df","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"grocery-db70e","configurations":{"android":"1:1071023352462:android:94cf7d0a6fe03534c637df","ios":"1:1071023352462:ios:9d7a1c5875e36c4ec637df","macos":"1:1071023352462:ios:9d7a1c5875e36c4ec637df","web":"1:1071023352462:web:cfdbbbeb72906bc0c637df","windows":"1:1071023352462:web:9b1697028053eebac637df"}}}}}}
+{
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "grocery-db70e",
+          "appId": "1:1071023352462:android:94cf7d0a6fe03534c637df",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "grocery-db70e",
+          "configurations": {
+            "android": "1:1071023352462:android:94cf7d0a6fe03534c637df",
+            "ios": "1:1071023352462:ios:9d7a1c5875e36c4ec637df",
+            "macos": "1:1071023352462:ios:9d7a1c5875e36c4ec637df",
+            "web": "1:1071023352462:web:cfdbbbeb72906bc0c637df",
+            "windows": "1:1071023352462:web:9b1697028053eebac637df"
+          }
+        }
+      }
+    }
+  }
+}

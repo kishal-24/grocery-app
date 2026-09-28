@@ -3,7 +3,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../bloc/cart/cart_bloc.dart';
 import '../../bloc/cart/cart_event.dart';
 import '../../core/constants/app_colors.dart';
-import '../../data/dummy_data.dart';
 import '../../data/models/product_model.dart';
 import '../../data/services/account_storage_service.dart';
 
@@ -62,21 +61,17 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
 
   void _reorder(OrderModel order) {
     for (final item in order.items) {
-      // Find matching product from DummyData if available, or construct ProductModel
-      final product = DummyData.products.firstWhere(
-        (p) => p.id == item.id,
-        orElse: () => ProductModel(
-          id: item.id,
-          name: item.name,
-          description: 'Delicious and fresh ${item.name}',
-          unit: item.unit,
-          price: item.price,
-          image: item.image,
-          category: 'Grocery',
-          rating: 4.8,
-          reviewsCount: 120,
-          nutritionInfo: 'Healthy',
-        ),
+      final product = ProductModel(
+        id: item.id,
+        name: item.name,
+        description: 'Delicious and fresh ${item.name}',
+        unit: item.unit.isNotEmpty ? item.unit : '1 item',
+        price: item.price,
+        image: item.image,
+        category: 'Grocery',
+        rating: 4.8,
+        reviewsCount: 120,
+        nutritionInfo: 'Healthy',
       );
 
       context.read<CartBloc>().add(AddToCartEvent(product: product, quantity: item.quantity));

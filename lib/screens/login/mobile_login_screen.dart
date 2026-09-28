@@ -43,12 +43,12 @@ class _MobileLoginScreenState extends State<MobileLoginScreen> {
     final password = passwordController.text.trim();
 
     if (usernameOrEmail.isEmpty) {
-      showToast('Please enter your username');
+      showToast('Please enter your username or email');
       return;
     }
 
     if (usernameOrEmail.length < 3) {
-      showToast('Username must be at least 3 characters');
+      showToast('Username or email must be at least 3 characters');
       return;
     }
 
@@ -253,7 +253,7 @@ class _MobileLoginScreenState extends State<MobileLoginScreen> {
 
                     // SUBTITLE
                     const Text(
-                      'Enter your username and password',
+                      'Enter your username or email and password',
                       style: TextStyle(
                         fontSize: 14,
                         color: AppColors.textGrey,
@@ -262,9 +262,9 @@ class _MobileLoginScreenState extends State<MobileLoginScreen> {
 
                     const SizedBox(height: 32),
 
-                    // USERNAME LABEL
+                    // USERNAME OR EMAIL LABEL
                     const Text(
-                      'Username',
+                      'Username or Email',
                       style: TextStyle(
                         fontSize: 13,
                         color: AppColors.textGrey,
@@ -274,11 +274,12 @@ class _MobileLoginScreenState extends State<MobileLoginScreen> {
 
                     const SizedBox(height: 6),
 
-                    // USERNAME FIELD
+                    // USERNAME OR EMAIL FIELD
                     TextField(
                       controller: usernameController,
-                      keyboardType: TextInputType.text,
+                      keyboardType: TextInputType.emailAddress,
                       textInputAction: TextInputAction.next,
+                      autocorrect: false,
                       enabled: !isLoading,
                       style: const TextStyle(
                         fontSize: 15,
@@ -286,7 +287,7 @@ class _MobileLoginScreenState extends State<MobileLoginScreen> {
                         fontWeight: FontWeight.w500,
                       ),
                       decoration: const InputDecoration(
-                        hintText: 'Enter your username',
+                        hintText: 'Enter your username or email',
                         hintStyle: TextStyle(
                           fontSize: 14,
                           color: AppColors.textLight,

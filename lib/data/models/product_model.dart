@@ -29,6 +29,84 @@ class ProductModel extends Equatable {
     this.isBestSelling = false,
   });
 
+  factory ProductModel.fromJson(Map<String, dynamic> json, [String? docId]) {
+    dynamic getValue(String key) {
+      if (json.containsKey(key)) return json[key];
+      for (final entry in json.entries) {
+        if (entry.key.trim().toLowerCase() == key.toLowerCase()) {
+          return entry.value;
+        }
+      }
+      return null;
+    }
+
+    final id = docId ?? (getValue('id') as String? ?? '');
+    final name = (getValue('name') as String?) ?? '';
+    final description = (getValue('description') as String?) ?? '';
+    final unit = (getValue('unit') as String?) ?? '1kg, Price';
+
+    final rawPrice = getValue('price');
+    double price = 0.0;
+    if (rawPrice is num) {
+      price = rawPrice.toDouble();
+    } else if (rawPrice is String) {
+      final numStr = rawPrice.replaceAll(RegExp(r'[^0-9.]'), '');
+      price = double.tryParse(numStr) ?? 0.0;
+    }
+
+    final image = (getValue('image') as String?) ?? '';
+    final category = (getValue('category') as String?) ?? '';
+
+    final rawRating = getValue('rating');
+    final rating = rawRating is num
+        ? rawRating.toDouble()
+        : (double.tryParse(rawRating?.toString() ?? '') ?? 4.8);
+
+    final rawReviews = getValue('reviewsCount') ?? getValue('reviews');
+    final reviewsCount = rawReviews is num
+        ? rawReviews.toInt()
+        : (int.tryParse(rawReviews?.toString() ?? '') ?? 120);
+
+    final nutritionInfo =
+        (getValue('nutritionInfo') as String?) ?? '100gr ~ 52 kcal';
+    final isExclusive = getValue('isExclusive') == true ||
+        getValue('isExclusive')?.toString() == 'true';
+    final isBestSelling = getValue('isBestSelling') == true ||
+        getValue('isBestSelling')?.toString() == 'true';
+
+    return ProductModel(
+      id: id,
+      name: name,
+      description: description,
+      unit: unit,
+      price: price,
+      image: image,
+      category: category,
+      rating: rating,
+      reviewsCount: reviewsCount,
+      nutritionInfo: nutritionInfo,
+      isExclusive: isExclusive,
+      isBestSelling: isBestSelling,
+    );
+  }
+
+  Map<String, dynamic> toFirestore() {
+    return {
+      'name': name,
+      'description': description,
+      'unit': unit,
+      'price': price,
+      'image': image,
+      'category': category,
+      'rating': rating,
+      'reviewsCount': reviewsCount,
+      'nutritionInfo': nutritionInfo,
+      'isExclusive': isExclusive,
+      'isBestSelling': isBestSelling,
+      'active': true,
+    };
+  }
+
   ProductModel copyWith({
     String? id,
     String? name,

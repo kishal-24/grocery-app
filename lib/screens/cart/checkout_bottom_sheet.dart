@@ -57,14 +57,74 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
   Future<void> _loadInitialData() async {
     final addresses = await AccountStorageService().getAddresses();
     final cards = await AccountStorageService().getCards();
+    final savedPrefs = await AccountStorageService().getSavedCheckoutPreferences();
+
+    AddressModel? selectedAddress;
+    String deliverySpeed = (savedPrefs['deliverySpeed'] as String?) ?? 'Standard';
+    bool deliveryChosen = false;
+
+    // Check if previously saved address exists in address list
+    final savedAddressId = savedPrefs['addressId'] as String?;
+    if (savedAddressId != null && addresses.isNotEmpty) {
+      final matches = addresses.where((a) => a.id == savedAddressId).toList();
+      if (matches.isNotEmpty) {
+        selectedAddress = matches.first;
+        deliveryChosen = true;
+      }
+    }
+
+    // If no matching saved address found, fall back to default or first address
+    if (selectedAddress == null && addresses.isNotEmpty) {
+      selectedAddress = addresses.firstWhere(
+        (a) => a.isDefault,
+        orElse: () => addresses.first,
+      );
+      deliveryChosen = true;
+    } else if (deliverySpeed == 'Pickup') {
+      deliveryChosen = true;
+    }
+
+    // Payment method
+    String? selectedPaymentMethod = savedPrefs['paymentMethod'] as String?;
+    bool paymentChosen = false;
+
+    if (selectedPaymentMethod != null && selectedPaymentMethod.isNotEmpty) {
+      paymentChosen = true;
+    } else if (cards.isNotEmpty) {
+      final defaultCard = cards.firstWhere((c) => c.isDefault, orElse: () => cards.first);
+      final last4 = defaultCard.cardNumber.length >= 4
+          ? defaultCard.cardNumber.substring(defaultCard.cardNumber.length - 4)
+          : defaultCard.cardNumber;
+      selectedPaymentMethod = '${defaultCard.cardType} ending in $last4';
+      paymentChosen = true;
+    } else {
+      selectedPaymentMethod = 'Cash on Delivery';
+      paymentChosen = true;
+    }
+
+    final selectedPaymentIcon = _getPaymentIcon(selectedPaymentMethod);
 
     if (mounted) {
       setState(() {
         _addresses = addresses;
         _cards = cards;
+        _selectedAddress = selectedAddress;
+        _deliverySpeed = deliverySpeed;
+        _deliveryChosen = deliveryChosen;
+        _selectedPaymentMethod = selectedPaymentMethod;
+        _selectedPaymentIcon = selectedPaymentIcon;
+        _paymentChosen = paymentChosen;
         _isLoading = false;
       });
     }
+  }
+
+  IconData _getPaymentIcon(String? method) {
+    if (method == null) return Icons.payment;
+    if (method == 'Apple Pay') return Icons.account_balance_wallet_outlined;
+    if (method == 'Google Pay') return Icons.wallet;
+    if (method == 'Cash on Delivery') return Icons.payments_outlined;
+    return Icons.credit_card;
   }
 
   double get _deliveryFee {
@@ -206,37 +266,78 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
                             color: AppColors.textDark,
                           ),
                         ),
-                        TextButton.icon(
-                          onPressed: () async {
-                            Navigator.pop(ctx);
-                            await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const DeliveryAddressScreen(),
-                              ),
-                            );
-                            final addrs =
-                                await AccountStorageService().getAddresses();
-                            setState(() {
-                              _addresses = addrs;
-                              if (addrs.isNotEmpty &&
-                                  !addrs.any((a) => a.id == _selectedAddress?.id)) {
-                                _selectedAddress = addrs.firstWhere(
-                                  (a) => a.isDefault,
-                                  orElse: () => addrs.first,
+                        Row(
+                          children: [
+                            TextButton.icon(
+                              onPressed: () {
+                                _showAddNewAddressDialog(
+                                  context: ctx,
+                                  onAddressSaved: (newAddr) {
+                                    setModalState(() {
+                                      _addresses.insert(0, newAddr);
+                                      tempAddress = newAddr;
+                                    });
+                                    setState(() {
+                                      _selectedAddress = newAddr;
+                                      _deliveryChosen = true;
+                                      _deliveryError = false;
+                                    });
+                                    AccountStorageService().saveCheckoutPreferences(
+                                      addressId: newAddr.id,
+                                      deliverySpeed: tempSpeed,
+                                    );
+                                  },
                                 );
-                              }
-                            });
-                          },
-                          icon: const Icon(Icons.add, size: 16),
-                          label: const Text(
-                            'Manage',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.primaryGreen,
+                              },
+                              icon: const Icon(Icons.add, size: 16),
+                              label: const Text(
+                                'Add New',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.primaryGreen,
+                                ),
+                              ),
                             ),
-                          ),
+                            TextButton(
+                              onPressed: () async {
+                                Navigator.pop(ctx);
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const DeliveryAddressScreen(),
+                                  ),
+                                );
+                                final addrs =
+                                    await AccountStorageService().getAddresses();
+                                setState(() {
+                                  _addresses = addrs;
+                                  if (addrs.isNotEmpty) {
+                                    _selectedAddress = addrs.firstWhere(
+                                      (a) => a.isDefault,
+                                      orElse: () => addrs.first,
+                                    );
+                                    _deliveryChosen = true;
+                                    _deliveryError = false;
+                                  }
+                                });
+                                if (_selectedAddress != null) {
+                                  AccountStorageService().saveCheckoutPreferences(
+                                    addressId: _selectedAddress!.id,
+                                    deliverySpeed: _deliverySpeed,
+                                  );
+                                }
+                              },
+                              child: const Text(
+                                'Manage',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textGrey,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -244,22 +345,25 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         child: OutlinedButton.icon(
-                          onPressed: () async {
-                            Navigator.pop(ctx);
-                            await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const DeliveryAddressScreen(),
-                              ),
+                          onPressed: () {
+                            _showAddNewAddressDialog(
+                              context: ctx,
+                              onAddressSaved: (newAddr) {
+                                setModalState(() {
+                                  _addresses.insert(0, newAddr);
+                                  tempAddress = newAddr;
+                                });
+                                setState(() {
+                                  _selectedAddress = newAddr;
+                                  _deliveryChosen = true;
+                                  _deliveryError = false;
+                                });
+                                AccountStorageService().saveCheckoutPreferences(
+                                  addressId: newAddr.id,
+                                  deliverySpeed: tempSpeed,
+                                );
+                              },
                             );
-                            final addrs =
-                                await AccountStorageService().getAddresses();
-                            setState(() {
-                              _addresses = addrs;
-                              if (addrs.isNotEmpty) {
-                                _selectedAddress = addrs.first;
-                              }
-                            });
                           },
                           icon: const Icon(Icons.add_location_alt_outlined,
                               color: AppColors.primaryGreen),
@@ -392,7 +496,18 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
                           _deliveryChosen = true;
                           _deliveryError = false;
                         });
+                        AccountStorageService().saveCheckoutPreferences(
+                          addressId: tempAddress?.id,
+                          deliverySpeed: tempSpeed,
+                        );
                         Navigator.pop(ctx);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('✓ Delivery details saved!'),
+                            backgroundColor: AppColors.primaryGreen,
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primaryGreen,
@@ -542,33 +657,121 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
                           color: AppColors.textDark,
                         ),
                       ),
-                      TextButton.icon(
-                        onPressed: () async {
-                          Navigator.pop(ctx);
-                          await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const PaymentMethodsScreen(),
+                      Row(
+                        children: [
+                          TextButton.icon(
+                            onPressed: () {
+                              _showAddNewCardDialog(
+                                context: ctx,
+                                onCardAdded: (newCard) {
+                                  final last4 = newCard.cardNumber.length >= 4
+                                      ? newCard.cardNumber.substring(newCard.cardNumber.length - 4)
+                                      : newCard.cardNumber;
+                                  final cardName = '${newCard.cardType} ending in $last4';
+                                  setModalState(() {
+                                    _cards.insert(0, newCard);
+                                    tempPayment = cardName;
+                                    tempIcon = Icons.credit_card;
+                                  });
+                                  setState(() {
+                                    _selectedPaymentMethod = cardName;
+                                    _selectedPaymentIcon = Icons.credit_card;
+                                    _paymentChosen = true;
+                                    _paymentError = false;
+                                  });
+                                  AccountStorageService().saveCheckoutPreferences(
+                                    paymentMethod: cardName,
+                                    paymentIconCode: Icons.credit_card.codePoint,
+                                  );
+                                },
+                              );
+                            },
+                            icon: const Icon(Icons.add, size: 16),
+                            label: const Text(
+                              'Add Card',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.primaryGreen,
+                              ),
                             ),
-                          );
-                          final cards =
-                              await AccountStorageService().getCards();
-                          setState(() {
-                            _cards = cards;
-                          });
-                        },
-                        icon: const Icon(Icons.add, size: 16),
-                        label: const Text(
-                          'Manage',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.primaryGreen,
                           ),
-                        ),
+                          TextButton(
+                            onPressed: () async {
+                              Navigator.pop(ctx);
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const PaymentMethodsScreen(),
+                                ),
+                              );
+                              final cards =
+                                  await AccountStorageService().getCards();
+                              setState(() {
+                                _cards = cards;
+                                if (cards.isNotEmpty) {
+                                  final def = cards.firstWhere((c) => c.isDefault, orElse: () => cards.first);
+                                  final last4 = def.cardNumber.length >= 4
+                                      ? def.cardNumber.substring(def.cardNumber.length - 4)
+                                      : def.cardNumber;
+                                  _selectedPaymentMethod = '${def.cardType} ending in $last4';
+                                  _selectedPaymentIcon = Icons.credit_card;
+                                  _paymentChosen = true;
+                                  _paymentError = false;
+                                  AccountStorageService().saveCheckoutPreferences(
+                                    paymentMethod: _selectedPaymentMethod,
+                                    paymentIconCode: Icons.credit_card.codePoint,
+                                  );
+                                }
+                              });
+                            },
+                            child: const Text(
+                              'Manage',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textGrey,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
+                  if (_cards.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          _showAddNewCardDialog(
+                            context: ctx,
+                            onCardAdded: (newCard) {
+                              final last4 = newCard.cardNumber.length >= 4
+                                  ? newCard.cardNumber.substring(newCard.cardNumber.length - 4)
+                                  : newCard.cardNumber;
+                              final cardName = '${newCard.cardType} ending in $last4';
+                              setModalState(() {
+                                _cards.insert(0, newCard);
+                                tempPayment = cardName;
+                                tempIcon = Icons.credit_card;
+                              });
+                              setState(() {
+                                _selectedPaymentMethod = cardName;
+                                _selectedPaymentIcon = Icons.credit_card;
+                                _paymentChosen = true;
+                                _paymentError = false;
+                              });
+                              AccountStorageService().saveCheckoutPreferences(
+                                paymentMethod: cardName,
+                                paymentIconCode: Icons.credit_card.codePoint,
+                              );
+                            },
+                          );
+                        },
+                        icon: const Icon(Icons.add_card, color: AppColors.primaryGreen, size: 18),
+                        label: const Text('Add New Card', style: TextStyle(color: AppColors.primaryGreen)),
+                      ),
+                    ),
                   ..._cards.map((card) {
                     final last4 = card.cardNumber.length >= 4
                         ? card.cardNumber.substring(card.cardNumber.length - 4)
@@ -656,7 +859,18 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
                           _paymentChosen = true;
                           _paymentError = false;
                         });
+                        AccountStorageService().saveCheckoutPreferences(
+                          paymentMethod: tempPayment,
+                          paymentIconCode: tempIcon.codePoint,
+                        );
                         Navigator.pop(ctx);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('✓ Payment method saved!'),
+                            backgroundColor: AppColors.primaryGreen,
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primaryGreen,
@@ -1117,6 +1331,12 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
     );
 
     AccountStorageService().addOrder(newOrder);
+    AccountStorageService().saveCheckoutPreferences(
+      addressId: _selectedAddress?.id,
+      deliverySpeed: _deliverySpeed,
+      paymentMethod: _selectedPaymentMethod,
+      paymentIconCode: _selectedPaymentIcon.codePoint,
+    );
 
     Navigator.pop(context); // Close checkout bottom sheet
     _showOrderAcceptedDialog(context);
@@ -1481,7 +1701,23 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
               ),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: const [
+              Icon(Icons.check_circle_outline, size: 14, color: AppColors.primaryGreen),
+              SizedBox(width: 6),
+              Text(
+                'Checkout details are automatically saved for your next order',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: AppColors.textGrey,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
         ],
       ),
     );
@@ -1579,4 +1815,462 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
       ),
     );
   }
+
+  void _showAddNewAddressDialog({
+    required BuildContext context,
+    required ValueChanged<AddressModel> onAddressSaved,
+  }) {
+    final formKey = GlobalKey<FormState>();
+    final titleController = TextEditingController(text: 'Home');
+    final nameController = TextEditingController();
+    final phoneController = TextEditingController();
+    final streetController = TextEditingController();
+    final cityController = TextEditingController();
+    final stateController = TextEditingController();
+    final zipController = TextEditingController();
+    bool isDefault = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (bottomCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+              ),
+              child: Container(
+                padding: const EdgeInsets.all(24),
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+                ),
+                child: SingleChildScrollView(
+                  child: Form(
+                    key: formKey,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Center(
+                          child: Container(
+                            width: 40,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade300,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Add New Address',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.textDark,
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close, color: AppColors.textGrey),
+                              onPressed: () => Navigator.pop(bottomCtx),
+                            ),
+                          ],
+                        ),
+                        const Divider(color: AppColors.divider),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Address Label',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textDark),
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: ['Home', 'Work', 'Other'].map((type) {
+                            final isSel = titleController.text == type;
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: ChoiceChip(
+                                label: Text(type),
+                                selected: isSel,
+                                selectedColor: AppColors.primaryGreenLight,
+                                labelStyle: TextStyle(
+                                  color: isSel ? AppColors.primaryGreen : AppColors.textDark,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                onSelected: (sel) {
+                                  if (sel) {
+                                    setModalState(() {
+                                      titleController.text = type;
+                                    });
+                                  }
+                                },
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                        const SizedBox(height: 12),
+                        _buildModalInputField(
+                          label: 'Full Name',
+                          controller: nameController,
+                          hint: 'e.g. Alex Johnson',
+                          validator: (val) => val == null || val.trim().isEmpty ? 'Required' : null,
+                        ),
+                        const SizedBox(height: 12),
+                        _buildModalInputField(
+                          label: 'Phone Number',
+                          controller: phoneController,
+                          hint: '+1 234 567 8900',
+                          keyboardType: TextInputType.phone,
+                          validator: (val) => val == null || val.trim().isEmpty ? 'Required' : null,
+                        ),
+                        const SizedBox(height: 12),
+                        _buildModalInputField(
+                          label: 'Street Address',
+                          controller: streetController,
+                          hint: 'Apartment, suite, street name',
+                          validator: (val) => val == null || val.trim().isEmpty ? 'Required' : null,
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              flex: 2,
+                              child: _buildModalInputField(
+                                label: 'City',
+                                controller: cityController,
+                                hint: 'City',
+                                validator: (val) => val == null || val.trim().isEmpty ? 'Required' : null,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              flex: 1,
+                              child: _buildModalInputField(
+                                label: 'State',
+                                controller: stateController,
+                                hint: 'State',
+                                validator: (val) => val == null || val.trim().isEmpty ? 'Req' : null,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              flex: 1,
+                              child: _buildModalInputField(
+                                label: 'ZIP',
+                                controller: zipController,
+                                hint: 'ZIP',
+                                keyboardType: TextInputType.number,
+                                validator: (val) => val == null || val.trim().isEmpty ? 'Req' : null,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text(
+                            'Set as default address',
+                            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                          ),
+                          activeThumbColor: AppColors.primaryGreen,
+                          value: isDefault,
+                          onChanged: (val) => setModalState(() => isDefault = val),
+                        ),
+                        const SizedBox(height: 20),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: ElevatedButton(
+                            onPressed: () async {
+                              if (!formKey.currentState!.validate()) return;
+                              final newAddr = AddressModel(
+                                id: 'addr_${DateTime.now().millisecondsSinceEpoch}',
+                                title: titleController.text.trim(),
+                                recipientName: nameController.text.trim(),
+                                phone: phoneController.text.trim(),
+                                street: streetController.text.trim(),
+                                city: cityController.text.trim(),
+                                state: stateController.text.trim(),
+                                zipCode: zipController.text.trim(),
+                                isDefault: isDefault,
+                              );
+                              await AccountStorageService().addAddress(newAddr);
+                              if (context.mounted) {
+                                Navigator.pop(bottomCtx);
+                                onAddressSaved(newAddr);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('✓ New address saved & selected for checkout!'),
+                                    backgroundColor: AppColors.primaryGreen,
+                                    duration: Duration(seconds: 2),
+                                  ),
+                                );
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primaryGreen,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            ),
+                            child: const Text('Save & Use Address', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showAddNewCardDialog({
+    required BuildContext context,
+    required ValueChanged<PaymentCardModel> onCardAdded,
+  }) {
+    final formKey = GlobalKey<FormState>();
+    final numberController = TextEditingController();
+    final holderController = TextEditingController();
+    final expiryController = TextEditingController();
+    final cvvController = TextEditingController();
+    String cardType = 'Mastercard';
+    bool isDefault = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (bottomCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+              child: Container(
+                padding: const EdgeInsets.all(24),
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+                ),
+                child: SingleChildScrollView(
+                  child: Form(
+                    key: formKey,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Center(
+                          child: Container(
+                            width: 40,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade300,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Add New Card',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.textDark,
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close, color: AppColors.textGrey),
+                              onPressed: () => Navigator.pop(bottomCtx),
+                            ),
+                          ],
+                        ),
+                        const Divider(color: AppColors.divider),
+                        const SizedBox(height: 14),
+                        const Text(
+                          'Card Brand',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textDark),
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: ['Visa', 'Mastercard', 'Amex'].map((brand) {
+                            final isSel = cardType == brand;
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: ChoiceChip(
+                                label: Text(brand),
+                                selected: isSel,
+                                selectedColor: AppColors.primaryGreenLight,
+                                labelStyle: TextStyle(
+                                  color: isSel ? AppColors.primaryGreen : AppColors.textDark,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                onSelected: (sel) {
+                                  if (sel) {
+                                    setModalState(() => cardType = brand);
+                                  }
+                                },
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                        const SizedBox(height: 14),
+                        _buildModalInputField(
+                          label: 'Card Number',
+                          controller: numberController,
+                          hint: '4242 4242 4242 4242',
+                          keyboardType: TextInputType.number,
+                          validator: (val) {
+                            if (val == null || val.replaceAll(' ', '').length < 16) {
+                              return 'Enter a valid 16-digit card number';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 14),
+                        _buildModalInputField(
+                          label: 'Cardholder Name',
+                          controller: holderController,
+                          hint: 'e.g. ALEX JOHNSON',
+                          validator: (val) => val == null || val.trim().isEmpty ? 'Required' : null,
+                        ),
+                        const SizedBox(height: 14),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _buildModalInputField(
+                                label: 'Expiry (MM/YY)',
+                                controller: expiryController,
+                                hint: '12/28',
+                                keyboardType: TextInputType.datetime,
+                                validator: (val) {
+                                  if (val == null || !val.contains('/')) {
+                                    return 'MM/YY';
+                                  }
+                                  return null;
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _buildModalInputField(
+                                label: 'CVV',
+                                controller: cvvController,
+                                hint: '123',
+                                keyboardType: TextInputType.number,
+                                obscureText: true,
+                                validator: (val) {
+                                  if (val == null || val.length < 3) {
+                                    return '3 digits';
+                                  }
+                                  return null;
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text(
+                            'Set as default payment method',
+                            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                          ),
+                          activeThumbColor: AppColors.primaryGreen,
+                          value: isDefault,
+                          onChanged: (val) => setModalState(() => isDefault = val),
+                        ),
+                        const SizedBox(height: 20),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: ElevatedButton(
+                            onPressed: () async {
+                              if (!formKey.currentState!.validate()) return;
+                              final newCard = PaymentCardModel(
+                                id: 'card_${DateTime.now().millisecondsSinceEpoch}',
+                                cardNumber: numberController.text.trim(),
+                                cardHolder: holderController.text.trim().toUpperCase(),
+                                expiry: expiryController.text.trim(),
+                                cardType: cardType,
+                                isDefault: isDefault,
+                              );
+                              await AccountStorageService().addCard(newCard);
+                              if (context.mounted) {
+                                Navigator.pop(bottomCtx);
+                                onCardAdded(newCard);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('✓ New card saved & selected for checkout!'),
+                                    backgroundColor: AppColors.primaryGreen,
+                                    duration: Duration(seconds: 2),
+                                  ),
+                                );
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primaryGreen,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            ),
+                            child: const Text('Save & Use Card', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildModalInputField({
+    required String label,
+    required TextEditingController controller,
+    required String hint,
+    TextInputType keyboardType = TextInputType.text,
+    bool obscureText = false,
+    String? Function(String?)? validator,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textDark),
+        ),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: controller,
+          keyboardType: keyboardType,
+          obscureText: obscureText,
+          validator: validator,
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: const TextStyle(color: AppColors.textGrey, fontSize: 13),
+            filled: true,
+            fillColor: AppColors.cardBackground,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.border)),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.border)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.primaryGreen, width: 1.5)),
+          ),
+        ),
+      ],
+    );
+  }
 }
+

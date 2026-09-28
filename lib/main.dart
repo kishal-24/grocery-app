@@ -4,7 +4,9 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'firebase_options.dart';
 import 'data/repositories/auth_repository.dart';
+import 'data/repositories/category_repository.dart';
 import 'data/repositories/location_repository.dart';
+import 'data/repositories/product_repository.dart';
 import 'bloc/auth/auth_bloc.dart';
 import 'bloc/location/location_bloc.dart';
 import 'bloc/cart/cart_bloc.dart';
@@ -30,6 +32,12 @@ class MyApp extends StatelessWidget {
       providers: [
         RepositoryProvider<AuthRepository>(
           create: (_) => AuthRepository(),
+        ),
+        RepositoryProvider<ProductRepository>(
+          create: (_) => ProductRepository(),
+        ),
+        RepositoryProvider<CategoryRepository>(
+          create: (_) => CategoryRepository(),
         ),
         RepositoryProvider<LocationRepository>(
           create: (_) => LocationRepository(),

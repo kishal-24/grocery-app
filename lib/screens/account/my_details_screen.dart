@@ -1,7 +1,10 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/app_colors.dart';
 import '../../data/services/account_storage_service.dart';
+import '../../widgets/user_avatar.dart';
 
 class MyDetailsScreen extends StatefulWidget {
   const MyDetailsScreen({super.key});
@@ -19,26 +22,12 @@ class _MyDetailsScreenState extends State<MyDetailsScreen> {
 
   String _selectedGender = 'Prefer not to say';
   int _selectedAvatarIndex = 0;
+  String? _customImage;
   bool _isLoading = true;
   bool _isSaving = false;
 
-  final List<Color> _avatarColors = [
-    AppColors.primaryGreen,
-    const Color(0xFF53B175),
-    const Color(0xFFF3603F),
-    const Color(0xFF5383EC),
-    const Color(0xFFD470FF),
-    const Color(0xFFF8A44C),
-  ];
-
-  final List<IconData> _avatarIcons = [
-    Icons.person,
-    Icons.face,
-    Icons.sentiment_very_satisfied,
-    Icons.emoji_emotions,
-    Icons.nature_people,
-    Icons.account_circle,
-  ];
+  final List<Color> _avatarColors = AvatarConstants.colors;
+  final List<IconData> _avatarIcons = AvatarConstants.icons;
 
   @override
   void initState() {
@@ -74,12 +63,31 @@ class _MyDetailsScreenState extends State<MyDetailsScreen> {
     _selectedGender = savedData['gender'] ?? 'Prefer not to say';
     _selectedAvatarIndex = int.tryParse(savedData['avatar'] ?? '0') ?? 0;
     if (_selectedAvatarIndex >= _avatarColors.length) _selectedAvatarIndex = 0;
+    final customImg = savedData['customImage'];
+    _customImage = (customImg != null && customImg.isNotEmpty) ? customImg : null;
 
     if (mounted) {
       setState(() {
         _isLoading = false;
       });
     }
+  }
+
+  void _onPickImageFromDevice() {
+    showProfilePhotoOptions(
+      context: context,
+      hasCustomImage: _customImage != null && _customImage!.isNotEmpty,
+      onImagePicked: (base64Image) {
+        setState(() {
+          _customImage = base64Image;
+        });
+      },
+      onRemovePhoto: () {
+        setState(() {
+          _customImage = null;
+        });
+      },
+    );
   }
 
   Future<void> _saveProfile() async {
@@ -92,11 +100,28 @@ class _MyDetailsScreenState extends State<MyDetailsScreen> {
       final newPhone = _phoneController.text.trim();
       final newDob = _dobController.text.trim();
 
-      // Update Firebase user displayName
+      // Update Firebase user displayName and sync username mapping
       final user = FirebaseAuth.instance.currentUser;
       if (user != null && newName.isNotEmpty) {
         try {
           await user.updateDisplayName(newName);
+          final userEmail = user.email;
+          if (userEmail != null && userEmail.isNotEmpty) {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString(
+              'username_to_email_${newName.toLowerCase()}',
+              userEmail,
+            );
+            try {
+              await FirebaseFirestore.instance
+                  .collection('usernames')
+                  .doc(newName.toLowerCase())
+                  .set({
+                'email': userEmail,
+                'uid': user.uid,
+              }, SetOptions(merge: true));
+            } catch (_) {}
+          }
         } catch (_) {}
       }
 
@@ -107,7 +132,25 @@ class _MyDetailsScreenState extends State<MyDetailsScreen> {
         dob: newDob,
         gender: _selectedGender,
         avatar: _selectedAvatarIndex.toString(),
+        customImage: _customImage,
+        clearCustomImage: _customImage == null || _customImage!.isEmpty,
       );
+
+      if (user != null) {
+        try {
+          if (_customImage != null && _customImage!.isNotEmpty) {
+            await FirebaseFirestore.instance
+                .collection('users')
+                .doc(user.uid)
+                .set({'profileImage': _customImage}, SetOptions(merge: true));
+          } else {
+            await FirebaseFirestore.instance
+                .collection('users')
+                .doc(user.uid)
+                .update({'profileImage': FieldValue.delete()});
+          }
+        } catch (_) {}
+      }
 
       if (mounted) {
         setState(() => _isSaving = false);
@@ -205,33 +248,92 @@ class _MyDetailsScreenState extends State<MyDetailsScreen> {
                     Center(
                       child: Column(
                         children: [
-                          CircleAvatar(
-                            radius: 46,
-                            backgroundColor: _avatarColors[_selectedAvatarIndex].withValues(alpha: 0.15),
-                            child: Icon(
-                              _avatarIcons[_selectedAvatarIndex],
-                              size: 54,
-                              color: _avatarColors[_selectedAvatarIndex],
-                            ),
+                          UserAvatar(
+                            radius: 48,
+                            customImage: _customImage,
+                            avatarIndex: _selectedAvatarIndex,
+                            showCameraBadge: true,
+                            onTap: _onPickImageFromDevice,
+                            onCameraTap: _onPickImageFromDevice,
                           ),
                           const SizedBox(height: 12),
-                          const Text(
-                            'Choose Avatar',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textGrey,
-                            ),
+                          Wrap(
+                            alignment: WrapAlignment.center,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            spacing: 10,
+                            runSpacing: 8,
+                            children: [
+                              OutlinedButton.icon(
+                                onPressed: _onPickImageFromDevice,
+                                icon: const Icon(
+                                  Icons.add_a_photo_outlined,
+                                  size: 16,
+                                  color: AppColors.primaryGreen,
+                                ),
+                                label: Text(
+                                  _customImage != null ? 'Change Photo' : 'Upload from Device',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.primaryGreen,
+                                  ),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                  side: const BorderSide(color: AppColors.primaryGreen, width: 1.2),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                ),
+                              ),
+                              if (_customImage != null)
+                                TextButton.icon(
+                                  onPressed: () {
+                                    setState(() {
+                                      _customImage = null;
+                                    });
+                                  },
+                                  icon: const Icon(Icons.delete_outline, size: 16, color: Colors.redAccent),
+                                  label: const Text(
+                                    'Remove',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.redAccent,
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
-                          const SizedBox(height: 10),
+                          const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              Expanded(child: Divider(color: Colors.grey.shade200, thickness: 1)),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 12),
+                                child: Text(
+                                  'Or choose an avatar icon',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.textGrey.withValues(alpha: 0.9),
+                                  ),
+                                ),
+                              ),
+                              Expanded(child: Divider(color: Colors.grey.shade200, thickness: 1)),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
                           Wrap(
                             spacing: 10,
                             children: List.generate(_avatarColors.length, (index) {
-                              final isSelected = index == _selectedAvatarIndex;
+                              final isSelected = (_customImage == null || _customImage!.isEmpty) &&
+                                  index == _selectedAvatarIndex;
                               return GestureDetector(
                                 onTap: () {
                                   setState(() {
                                     _selectedAvatarIndex = index;
+                                    _customImage = null;
                                   });
                                 },
                                 child: Container(

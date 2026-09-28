@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -5,6 +6,7 @@ import '../../bloc/auth/auth_bloc.dart';
 import '../../bloc/auth/auth_event.dart';
 import '../../core/constants/app_colors.dart';
 import '../../data/services/account_storage_service.dart';
+import '../../widgets/user_avatar.dart';
 import '../login/mobile_login_screen.dart';
 import 'about_screen.dart';
 import 'delivery_address_screen.dart';
@@ -26,24 +28,7 @@ class _AccountScreenState extends State<AccountScreen> {
   String _displayName = 'User';
   String _userEmail = 'Not logged in';
   int _avatarIndex = 0;
-
-  final List<Color> _avatarColors = [
-    AppColors.primaryGreen,
-    const Color(0xFF53B175),
-    const Color(0xFFF3603F),
-    const Color(0xFF5383EC),
-    const Color(0xFFD470FF),
-    const Color(0xFFF8A44C),
-  ];
-
-  final List<IconData> _avatarIcons = [
-    Icons.person,
-    Icons.face,
-    Icons.sentiment_very_satisfied,
-    Icons.emoji_emotions,
-    Icons.nature_people,
-    Icons.account_circle,
-  ];
+  String? _customImage;
 
   @override
   void initState() {
@@ -75,15 +60,72 @@ class _AccountScreenState extends State<AccountScreen> {
 
     final email = user?.email ?? 'user@freshbasket.com';
     int avatarIdx = int.tryParse(savedData['avatar'] ?? '0') ?? 0;
-    if (avatarIdx >= _avatarColors.length) avatarIdx = 0;
+    if (avatarIdx >= AvatarConstants.colors.length) avatarIdx = 0;
+    final customImg = savedData['customImage'];
 
     if (mounted) {
       setState(() {
         _displayName = name;
         _userEmail = email;
         _avatarIndex = avatarIdx;
+        _customImage = (customImg != null && customImg.isNotEmpty) ? customImg : null;
       });
     }
+  }
+
+  void _onChangeProfilePhoto() {
+    showProfilePhotoOptions(
+      context: context,
+      hasCustomImage: _customImage != null && _customImage!.isNotEmpty,
+      onImagePicked: (base64Image) async {
+        await AccountStorageService().saveUserProfile(customImage: base64Image);
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          try {
+            await FirebaseFirestore.instance
+                .collection('users')
+                .doc(user.uid)
+                .set({'profileImage': base64Image}, SetOptions(merge: true));
+          } catch (_) {}
+        }
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.white),
+                  SizedBox(width: 8),
+                  Text('Profile picture updated successfully!'),
+                ],
+              ),
+              backgroundColor: AppColors.primaryGreen,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      },
+      onRemovePhoto: () async {
+        await AccountStorageService().saveUserProfile(clearCustomImage: true);
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          try {
+            await FirebaseFirestore.instance
+                .collection('users')
+                .doc(user.uid)
+                .update({'profileImage': FieldValue.delete()});
+          } catch (_) {}
+        }
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Profile photo removed'),
+              backgroundColor: AppColors.primaryGreen,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      },
+    );
   }
 
   void _navigateToOption(String title) {
@@ -203,14 +245,13 @@ class _AccountScreenState extends State<AccountScreen> {
                     ),
                     child: Row(
                       children: [
-                        CircleAvatar(
+                        UserAvatar(
                           radius: 34,
-                          backgroundColor: _avatarColors[_avatarIndex].withValues(alpha: 0.15),
-                          child: Icon(
-                            _avatarIcons[_avatarIndex],
-                            size: 40,
-                            color: _avatarColors[_avatarIndex],
-                          ),
+                          customImage: _customImage,
+                          avatarIndex: _avatarIndex,
+                          showCameraBadge: true,
+                          onTap: _onChangeProfilePhoto,
+                          onCameraTap: _onChangeProfilePhoto,
                         ),
                         const SizedBox(width: 16),
                         Expanded(

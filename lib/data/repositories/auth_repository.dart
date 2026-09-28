@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'user_repository.dart';
 
 class AuthRepository {
   final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
+  final UserRepository _userRepository = UserRepository();
 
   // ============================================================
   // RESOLVE EMAIL FROM USERNAME OR EMAIL
@@ -26,7 +29,7 @@ class AuthRepository {
 
     final lower = input.toLowerCase();
 
-    // Check local cache in SharedPreferences
+    // 1. Check local cache in SharedPreferences first (instant)
     try {
       final prefs = await SharedPreferences.getInstance();
       final cachedEmail = prefs.getString('username_to_email_$lower');
@@ -35,10 +38,46 @@ class AuthRepository {
       }
     } catch (_) {}
 
-    // Fallback: If not found in local cache
+    // 2. Check Cloud Firestore (enables login across different devices or fresh installs)
+    try {
+      final usernameDoc = await FirebaseFirestore.instance
+          .collection('usernames')
+          .doc(lower)
+          .get()
+          .timeout(const Duration(seconds: 4));
+
+      if (usernameDoc.exists && usernameDoc.data()?['email'] != null) {
+        final email = usernameDoc.data()!['email'] as String;
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('username_to_email_$lower', email);
+        } catch (_) {}
+        return email;
+      }
+
+      final querySnap = await FirebaseFirestore.instance
+          .collection('users')
+          .where('username_lowercase', isEqualTo: lower)
+          .limit(1)
+          .get()
+          .timeout(const Duration(seconds: 4));
+
+      if (querySnap.docs.isNotEmpty) {
+        final email = querySnap.docs.first.data()['email'] as String?;
+        if (email != null && email.isNotEmpty) {
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('username_to_email_$lower', email);
+          } catch (_) {}
+          return email;
+        }
+      }
+    } catch (_) {}
+
+    // Fallback: If not found in local cache or Firestore
     throw FirebaseAuthException(
       code: 'user-not-found',
-      message: 'No account found for username "$input". Please log in with your email address.',
+      message: 'No account found for username "$input". Please check your username or log in with your email address.',
     );
   }
 
@@ -57,21 +96,44 @@ class AuthRepository {
       password: password,
     );
 
-    // Cache username to email locally upon login
+    // Cache username to email locally upon login and sync to Firestore
     try {
       final user = credential.user;
       final prefs = await SharedPreferences.getInstance();
+      final effectiveEmail = user?.email ?? email;
+
       if (user?.displayName != null && user!.displayName!.isNotEmpty) {
+        final dName = user.displayName!.trim();
         await prefs.setString(
-          'username_to_email_${user.displayName!.trim().toLowerCase()}',
-          email,
+          'username_to_email_${dName.toLowerCase()}',
+          effectiveEmail,
         );
+        try {
+          await FirebaseFirestore.instance
+              .collection('usernames')
+              .doc(dName.toLowerCase())
+              .set({
+            'email': effectiveEmail,
+            'uid': user.uid,
+          }, SetOptions(merge: true));
+        } catch (_) {}
       }
+
       if (!usernameOrEmail.contains('@')) {
+        final lower = usernameOrEmail.trim().toLowerCase();
         await prefs.setString(
-          'username_to_email_${usernameOrEmail.trim().toLowerCase()}',
-          email,
+          'username_to_email_$lower',
+          effectiveEmail,
         );
+        try {
+          await FirebaseFirestore.instance
+              .collection('usernames')
+              .doc(lower)
+              .set({
+            'email': effectiveEmail,
+            'uid': user?.uid,
+          }, SetOptions(merge: true));
+        } catch (_) {}
       }
     } catch (_) {}
 
@@ -91,23 +153,45 @@ class AuthRepository {
     final cleanUsername = username?.trim();
 
     final userCredential =
-        await _firebaseAuth.createUserWithEmailAndPassword(
+    await _firebaseAuth.createUserWithEmailAndPassword(
       email: cleanEmail,
       password: password,
     );
 
+    final user = userCredential.user;
+
+    if (user == null) {
+      throw FirebaseAuthException(
+        code: 'user-creation-failed',
+        message: 'Unable to create your account.',
+      );
+    }
+
+    // Save username in Firebase Authentication
+    if (cleanUsername != null && cleanUsername.isNotEmpty) {
+      await user.updateDisplayName(cleanUsername);
+
+      // Refresh local Firebase user object
+      await user.reload();
+    }
+
+    // Create production Firestore user profile
+    await _userRepository.createUserProfile(
+      user: user,
+      username: cleanUsername,
+    );
+
+    // Keep the existing local cache for now.
+    // We will remove this dependency later.
     if (cleanUsername != null && cleanUsername.isNotEmpty) {
       try {
-        await userCredential.user?.updateDisplayName(cleanUsername);
-      } catch (_) {}
-
-      // Cache locally in SharedPreferences immediately
-      try {
         final prefs = await SharedPreferences.getInstance();
+
         await prefs.setString(
           'username_to_email_${cleanUsername.toLowerCase()}',
           cleanEmail,
         );
+
         await prefs.setString(
           'email_to_username_${cleanEmail.toLowerCase()}',
           cleanUsername,
@@ -115,9 +199,9 @@ class AuthRepository {
       } catch (_) {}
     }
 
-    // Send verification link (safely catches in case of rate limit)
+    // Send email verification
     try {
-      await userCredential.user?.sendEmailVerification();
+      await user.sendEmailVerification();
     } catch (_) {}
 
     return userCredential;

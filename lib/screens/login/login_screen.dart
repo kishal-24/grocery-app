@@ -102,13 +102,13 @@ class _LoginScreenState extends State<LoginScreen> {
                               Icons.mail,
                             ),
 
-                            const SizedBox(width: 15,),
+                            const SizedBox(width: 15),
 
                             const Text(
-                              'Continue with email id',
+                              'Continue with email or username',
                               style: TextStyle(
                                 color: Colors.white,
-                                fontSize: 20,
+                                fontSize: 18,
                                 fontWeight:
                                 FontWeight.w500,
                               ),
