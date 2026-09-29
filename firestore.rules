@@ -1,8 +1,12 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions
+    // ============================================================
+    // HELPER FUNCTIONS
+    // ============================================================
+
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -11,64 +15,189 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // Products collection: anyone can read active products, authenticated users can read all
+    // Role check: verifies custom claims (admin: true or role: 'admin')
+    // or falls back to Firestore user profile document role.
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.admin == true ||
+        request.auth.token.role == 'admin' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
+    }
+
+    // ============================================================
+    // PRODUCTS
+    // Customers can READ only.
+    // Customers CANNOT create, update, or delete products.
+    // Only admins can modify.
+    // ============================================================
+
     match /products/{productId} {
       allow read: if true;
-      allow write: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
     }
 
-    // Categories collection: anyone can read categories
+    // ============================================================
+    // CATEGORIES
+    // Customers can READ only.
+    // Customers CANNOT create, update, or delete categories.
+    // Only admins can modify.
+    // ============================================================
+
     match /categories/{categoryId} {
       allow read: if true;
-      allow write: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
     }
 
-    // Promos collection: anyone can read available promos
+    // ============================================================
+    // PROMOS
+    // Customers can READ only.
+    // Customers CANNOT create, update, or delete promos.
+    // Only admins can modify.
+    // ============================================================
+
     match /promos/{promoId} {
       allow read: if true;
-      allow write: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
     }
 
-    // Usernames mapping collection: read allowed for email lookup during login
+    // ============================================================
+    // USERNAME LOOKUP
+    // Public READ allows cross-device / unauthenticated username login.
+    // Direct client writes are forbidden (managed by Cloud Functions).
+    // ============================================================
+
     match /usernames/{username} {
       allow read: if true;
-      allow write: if isAuthenticated();
+      allow create, update, delete: if false;
     }
 
-    // Orders collection: users can read/create/update their own orders
+    // ============================================================
+    // USERS
+    // Customers can ONLY access their own data.
+    // Customers CANNOT modify another user's profile.
+    // Customers CANNOT escalate their role to admin.
+    // ============================================================
+
+    match /users/{userId} {
+      // User can read only their own profile; admins can read any profile.
+      allow read: if isOwner(userId) || isAdmin();
+
+      // On creation: owner can create, but cannot set role to admin (must be 'customer' or omitted).
+      allow create: if isOwner(userId) && (
+        !('role' in request.resource.data) ||
+        request.resource.data.role == 'customer'
+      );
+
+      // On update: owner can update profile fields, but CANNOT modify the 'role' field.
+      // Only admins can modify user roles.
+      allow update: if (
+        isOwner(userId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role'])
+      ) || isAdmin();
+
+      // Deletion of user profile documents forbidden for clients.
+      allow delete: if isAdmin();
+
+      // ----------------------------------------------------------
+      // ADDRESSES SUBCOLLECTION
+      // ----------------------------------------------------------
+      match /addresses/{addressId} {
+        allow read, create, update, delete: if isOwner(userId) || isAdmin();
+      }
+
+      // ----------------------------------------------------------
+      // CART SUBCOLLECTION
+      // Customer can only view and manage their own cart.
+      // ----------------------------------------------------------
+      match /cart/{itemId} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+
+      // ----------------------------------------------------------
+      // FAVORITES SUBCOLLECTION
+      // Customer can only view and manage their own favorites.
+      // ----------------------------------------------------------
+      match /favorites/{favoriteId} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+
+      // ----------------------------------------------------------
+      // NOTIFICATIONS SUBCOLLECTION
+      // ----------------------------------------------------------
+      match /notifications/{notificationId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if isAdmin(); // Notifications generated by backend
+        allow update: if isOwner(userId) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+        allow delete: if isOwner(userId) || isAdmin();
+      }
+
+      // ----------------------------------------------------------
+      // PAYMENT CARDS SUBCOLLECTION
+      // ----------------------------------------------------------
+      match /cards/{cardId} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+
+      // ----------------------------------------------------------
+      // USER ORDERS SUBCOLLECTION
+      // ----------------------------------------------------------
+      match /orders/{orderId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+
+      // ----------------------------------------------------------
+      // USER PAYMENTS SUBCOLLECTION
+      // ----------------------------------------------------------
+      match /payments/{paymentId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // ============================================================
+    // ORDERS (ROOT COLLECTION)
+    // Customers can create and view their own orders.
+    // ============================================================
+
     match /orders/{orderId} {
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow read, update: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
-      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow read, update: if isAuthenticated() && (
+        resource == null || resource.data.userId == request.auth.uid || isAdmin()
+      );
+      allow delete: if isAdmin();
     }
 
-    // User profile and private subcollections
-    match /users/{userId} {
-      allow read, write: if isOwner(userId);
+    // ============================================================
+    // PAYMENTS (ROOT COLLECTION)
+    // Customers can record and view their own payments.
+    // ============================================================
 
-      match /addresses/{addressId} {
-        allow read, write: if isOwner(userId);
-      }
+    match /payments/{paymentId} {
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow read, update: if isAuthenticated() && (
+        resource == null || resource.data.userId == request.auth.uid || isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
 
-      match /cards/{cardId} {
-        allow read, write: if isOwner(userId);
-      }
+    // ============================================================
+    // SERVICE AREAS
+    // Public read; admin-only write.
+    // ============================================================
 
-      match /notifications/{notifId} {
-        allow read, write: if isOwner(userId);
-      }
+    match /serviceAreas/{areaId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
 
-      match /cart/{itemId} {
-        allow read, write: if isOwner(userId);
-      }
+    // ============================================================
+    // DEFAULT CATCH-ALL: DENY
+    // ============================================================
 
-      match /favorites/{favId} {
-        allow read, write: if isOwner(userId);
-      }
-
-      match /orders/{orderId} {
-        allow read, write: if isOwner(userId);
-      }
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

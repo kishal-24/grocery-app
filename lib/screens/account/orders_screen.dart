@@ -427,8 +427,47 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
                         order.paymentMethod,
                         style: const TextStyle(fontSize: 14, color: AppColors.textDark, fontWeight: FontWeight.w500),
                       ),
+                      if (order.paymentStatus != null && order.paymentStatus!.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: order.paymentStatus!.toLowerCase().contains('paid') ||
+                                    order.paymentStatus!.toLowerCase().contains('completed') ||
+                                    order.paymentStatus!.toLowerCase().contains('success')
+                                ? AppColors.primaryGreenLight
+                                : const Color(0xFFFFF3E0),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            order.paymentStatus!,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: order.paymentStatus!.toLowerCase().contains('paid') ||
+                                      order.paymentStatus!.toLowerCase().contains('completed') ||
+                                      order.paymentStatus!.toLowerCase().contains('success')
+                                  ? AppColors.primaryGreen
+                                  : Colors.orange.shade800,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
+                  if (order.transactionRef != null && order.transactionRef!.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        const Icon(Icons.receipt_long_outlined, size: 20, color: AppColors.textGrey),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Ref: ${order.transactionRef!}',
+                          style: const TextStyle(fontSize: 12, color: AppColors.textGrey, fontWeight: FontWeight.w500),
+                        ),
+                      ],
+                    ),
+                  ],
 
                   const SizedBox(height: 24),
                   Row(

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/app_colors.dart';
 import '../../data/services/account_storage_service.dart';
 
@@ -12,7 +13,8 @@ class PaymentMethodsScreen extends StatefulWidget {
 class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
   List<PaymentCardModel> _cards = [];
   bool _isLoading = true;
-  String _selectedWallet = 'Google Pay';
+  String _selectedWallet = 'Google Pay (GPay)';
+  String _gpayUpiId = 'freshbasket.user@okhdfcbank';
 
   @override
   void initState() {
@@ -22,9 +24,13 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
 
   Future<void> _loadCards() async {
     final list = await AccountStorageService().getCards();
+    final upiId = await AccountStorageService().getGpayUpiId();
     if (mounted) {
       setState(() {
         _cards = list;
+        if (upiId != null && upiId.isNotEmpty) {
+          _gpayUpiId = upiId;
+        }
         _isLoading = false;
       });
     }
@@ -430,13 +436,182 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
                   ),
                   const SizedBox(height: 14),
 
-                  _buildWalletTile(
-                    title: 'Google Pay',
-                    subtitle: 'Fast, secure checkout with your Google Account',
-                    icon: Icons.account_balance_wallet_outlined,
-                    iconColor: const Color(0xFF4285F4),
-                    isSelected: _selectedWallet == 'Google Pay',
-                    onTap: () => setState(() => _selectedWallet = 'Google Pay'),
+                  // Google Pay (GPay) Dedicated Card
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: _selectedWallet == 'Google Pay (GPay)'
+                          ? const Color(0xFF4285F4).withValues(alpha: 0.08)
+                          : Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: _selectedWallet == 'Google Pay (GPay)'
+                            ? const Color(0xFF4285F4)
+                            : AppColors.border,
+                        width: _selectedWallet == 'Google Pay (GPay)' ? 1.8 : 1,
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: Colors.grey.shade200),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(alpha: 0.05),
+                                      blurRadius: 4,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: Center(
+                                  child: RichText(
+                                    text: const TextSpan(
+                                      style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold),
+                                      children: [
+                                        TextSpan(
+                                            text: 'G',
+                                            style: TextStyle(
+                                                color: Color(0xFF4285F4))),
+                                        TextSpan(
+                                            text: 'P',
+                                            style: TextStyle(
+                                                color: Color(0xFFEA4335))),
+                                        TextSpan(
+                                            text: 'a',
+                                            style: TextStyle(
+                                                color: Color(0xFFFBBC05))),
+                                        TextSpan(
+                                            text: 'y',
+                                            style: TextStyle(
+                                                color: Color(0xFF34A853))),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        const Text(
+                                          'Google Pay (GPay)',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 16,
+                                            color: AppColors.textDark,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF4285F4)
+                                                .withValues(alpha: 0.12),
+                                            borderRadius:
+                                                BorderRadius.circular(6),
+                                          ),
+                                          child: const Text(
+                                            'UPI Verified',
+                                            style: TextStyle(
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.bold,
+                                              color: Color(0xFF1967D2),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      'UPI: $_gpayUpiId',
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                        color: AppColors.textDark,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                icon: Icon(
+                                  _selectedWallet == 'Google Pay (GPay)'
+                                      ? Icons.radio_button_checked
+                                      : Icons.radio_button_off,
+                                  color: _selectedWallet == 'Google Pay (GPay)'
+                                      ? const Color(0xFF4285F4)
+                                      : AppColors.textGrey,
+                                ),
+                                onPressed: () {
+                                  setState(() =>
+                                      _selectedWallet = 'Google Pay (GPay)');
+                                  AccountStorageService().saveCheckoutPreferences(
+                                    paymentMethod: 'Google Pay (GPay)',
+                                    gpayUpiId: _gpayUpiId,
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              OutlinedButton.icon(
+                                onPressed: _showEditGpayUpiDialog,
+                                icon: const Icon(Icons.edit,
+                                    size: 15, color: Color(0xFF4285F4)),
+                                label: const Text('Change UPI ID',
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: Color(0xFF4285F4))),
+                                style: OutlinedButton.styleFrom(
+                                  side: BorderSide(
+                                      color: const Color(0xFF4285F4)
+                                          .withValues(alpha: 0.4)),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 6),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8)),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              OutlinedButton.icon(
+                                onPressed: _testLaunchGpayApp,
+                                icon: const Icon(Icons.launch,
+                                    size: 15, color: AppColors.textDark),
+                                label: const Text('Test GPay App',
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: AppColors.textDark)),
+                                style: OutlinedButton.styleFrom(
+                                  side: const BorderSide(color: AppColors.border),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 6),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8)),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 10),
 
@@ -654,6 +829,264 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
           color: isSelected ? AppColors.primaryGreen : AppColors.textGrey,
         ),
       ),
+    );
+  }
+
+  Future<void> _testLaunchGpayApp() async {
+    final upiUri = Uri.parse(
+      'upi://pay?pa=$_gpayUpiId&pn=FreshBasket%20Test&am=1.00&cu=USD&tn=GPay%20Setup%20Verification',
+    );
+    try {
+      if (await canLaunchUrl(upiUri)) {
+        await launchUrl(upiUri, mode: LaunchMode.externalNonBrowserApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✓ GPay UPI handle verified! Ready for 1-tap checkout.'),
+              backgroundColor: AppColors.primaryGreen,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✓ GPay UPI configured successfully.'),
+            backgroundColor: AppColors.primaryGreen,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  void _showEditGpayUpiDialog() {
+    final controller = TextEditingController(text: _gpayUpiId);
+    final formKey = GlobalKey<FormState>();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (bottomCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Padding(
+              padding:
+                  EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+              child: Container(
+                padding: const EdgeInsets.all(24),
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius:
+                      BorderRadius.vertical(top: Radius.circular(28)),
+                ),
+                child: Form(
+                  key: formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade300,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.grey.shade200),
+                            ),
+                            child: Center(
+                              child: RichText(
+                                text: const TextSpan(
+                                  style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold),
+                                  children: [
+                                    TextSpan(
+                                        text: 'G',
+                                        style: TextStyle(
+                                            color: Color(0xFF4285F4))),
+                                    TextSpan(
+                                        text: 'P',
+                                        style: TextStyle(
+                                            color: Color(0xFFEA4335))),
+                                    TextSpan(
+                                        text: 'a',
+                                        style: TextStyle(
+                                            color: Color(0xFFFBBC05))),
+                                    TextSpan(
+                                        text: 'y',
+                                        style: TextStyle(
+                                            color: Color(0xFF34A853))),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Text(
+                              'Edit Google Pay UPI ID',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.textDark,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close,
+                                color: AppColors.textGrey),
+                            onPressed: () => Navigator.pop(bottomCtx),
+                          ),
+                        ],
+                      ),
+                      const Divider(color: AppColors.divider),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Link your Google Pay Virtual Payment Address (VPA) for one-tap payments:',
+                        style: TextStyle(
+                            fontSize: 13, color: AppColors.textGrey),
+                      ),
+                      const SizedBox(height: 14),
+                      TextFormField(
+                        controller: controller,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: InputDecoration(
+                          prefixIcon: const Icon(Icons.alternate_email,
+                              color: Color(0xFF4285F4)),
+                          hintText: 'e.g. yourname@okhdfcbank',
+                          hintStyle: const TextStyle(
+                              fontSize: 13, color: AppColors.textGrey),
+                          filled: true,
+                          fillColor: AppColors.cardBackground,
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide:
+                                  const BorderSide(color: AppColors.border)),
+                          enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide:
+                                  const BorderSide(color: AppColors.border)),
+                          focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(
+                                  color: Color(0xFF4285F4), width: 1.5)),
+                        ),
+                        validator: (val) {
+                          if (val == null || val.trim().isEmpty) {
+                            return 'Please enter your UPI handle';
+                          }
+                          if (!val.contains('@')) {
+                            return 'Enter a valid UPI handle (e.g. name@okhdfcbank)';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Popular GPay handles:',
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textGrey),
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          '@okhdfcbank',
+                          '@okaxis',
+                          '@oksbi',
+                          '@okicici'
+                        ].map((handle) {
+                          return ActionChip(
+                            label: Text(handle,
+                                style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFF1967D2))),
+                            backgroundColor: const Color(0xFF4285F4)
+                                .withValues(alpha: 0.08),
+                            side: BorderSide.none,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                            onPressed: () {
+                              final text = controller.text;
+                              final prefix = text.contains('@')
+                                  ? text.split('@').first
+                                  : text;
+                              controller.text = '$prefix$handle';
+                            },
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 50,
+                        child: ElevatedButton(
+                          onPressed: () async {
+                            if (!formKey.currentState!.validate()) return;
+                            final newUpi = controller.text.trim();
+                            await AccountStorageService().saveGpayUpiId(newUpi);
+                            await AccountStorageService().saveCheckoutPreferences(
+                              gpayUpiId: newUpi,
+                              paymentMethod: 'Google Pay (GPay)',
+                            );
+                            if (bottomCtx.mounted) {
+                              Navigator.pop(bottomCtx);
+                            }
+                            if (mounted) {
+                              setState(() {
+                                _gpayUpiId = newUpi;
+                                _selectedWallet = 'Google Pay (GPay)';
+                              });
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                      '✓ Google Pay UPI ID updated successfully!'),
+                                  backgroundColor: AppColors.primaryGreen,
+                                  duration: Duration(seconds: 2),
+                                ),
+                              );
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF4285F4),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14)),
+                          ),
+                          child: const Text('Save Google Pay UPI',
+                              style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

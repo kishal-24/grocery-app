@@ -8,8 +8,13 @@ import '../../data/models/product_model.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final ProductModel product;
+  final String? heroTag;
 
-  const ProductDetailScreen({super.key, required this.product});
+  const ProductDetailScreen({
+    super.key,
+    required this.product,
+    this.heroTag,
+  });
 
   @override
   State<ProductDetailScreen> createState() => _ProductDetailScreenState();
@@ -22,6 +27,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final product = widget.product;
+    final effectiveHeroTag = widget.heroTag ?? 'product_img_${product.id}';
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -66,7 +72,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     ),
                     child: Center(
                       child: Hero(
-                        tag: 'product_img_${product.id}',
+                        tag: effectiveHeroTag,
                         child: Image.network(
                           product.image,
                           height: 200,

@@ -9,15 +9,19 @@ import '../screens/product/product_detail_screen.dart';
 class ProductCard extends StatelessWidget {
   final ProductModel product;
   final double width;
+  final String? heroTag;
 
   const ProductCard({
     super.key,
     required this.product,
     this.width = 173,
+    this.heroTag,
   });
 
   @override
   Widget build(BuildContext context) {
+    final effectiveHeroTag = heroTag ?? 'product_img_${product.id}';
+
     return Container(
       width: width,
       decoration: BoxDecoration(
@@ -34,7 +38,10 @@ class ProductCard extends StatelessWidget {
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (_) => ProductDetailScreen(product: product),
+                builder: (_) => ProductDetailScreen(
+                  product: product,
+                  heroTag: effectiveHeroTag,
+                ),
               ),
             );
           },
@@ -47,7 +54,7 @@ class ProductCard extends StatelessWidget {
                 Expanded(
                   child: Center(
                     child: Hero(
-                      tag: 'product_img_${product.id}',
+                      tag: effectiveHeroTag,
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(10),
                         child: Image.network(

@@ -1,5 +1,4 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../dummy_data.dart';
 import '../models/product_model.dart';
 
 class ProductRepository {
@@ -15,7 +14,10 @@ class ProductRepository {
   Future<List<ProductModel>> getProducts() async {
     try {
       // First attempt: active products
-      final snapshot = await _collection.where('active', isEqualTo: true).get();
+      final snapshot = await _collection
+          .where('active', isEqualTo: true)
+          .get(const GetOptions(source: Source.serverAndCache))
+          .timeout(const Duration(seconds: 10));
 
       if (snapshot.docs.isNotEmpty) {
         return snapshot.docs
@@ -24,25 +26,14 @@ class ProductRepository {
       }
 
       // Second attempt: all products
-      final allSnapshot = await _collection.get();
-      if (allSnapshot.docs.isNotEmpty) {
-        return allSnapshot.docs
-            .map((doc) => ProductModel.fromJson(doc.data(), doc.id))
-            .toList();
-      }
-
-      // Third attempt: seed if empty
-      await seedDefaultProducts();
-      final seeded = await _collection.get();
-      if (seeded.docs.isNotEmpty) {
-        return seeded.docs
-            .map((doc) => ProductModel.fromJson(doc.data(), doc.id))
-            .toList();
-      }
-
-      return DummyData.products;
+      final allSnapshot = await _collection
+          .get(const GetOptions(source: Source.serverAndCache))
+          .timeout(const Duration(seconds: 10));
+      return allSnapshot.docs
+          .map((doc) => ProductModel.fromJson(doc.data(), doc.id))
+          .toList();
     } catch (_) {
-      return DummyData.products;
+      return [];
     }
   }
 
@@ -80,20 +71,9 @@ class ProductRepository {
 
   Stream<List<ProductModel>> productsStream() {
     return _collection.snapshots().map((snapshot) {
-      if (snapshot.docs.isEmpty) {
-        return DummyData.products;
-      }
       return snapshot.docs
           .map((doc) => ProductModel.fromJson(doc.data(), doc.id))
           .toList();
     });
-  }
-
-  Future<void> seedDefaultProducts() async {
-    try {
-      for (final p in DummyData.products) {
-        await _collection.doc(p.id).set(p.toFirestore());
-      }
-    } catch (_) {}
   }
 }

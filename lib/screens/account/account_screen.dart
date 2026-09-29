@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -58,10 +57,10 @@ class _AccountScreenState extends State<AccountScreen> {
       name = 'User';
     }
 
-    final email = user?.email ?? 'user@freshbasket.com';
+    final email = user?.email ?? (savedData['email']?.isNotEmpty == true ? savedData['email']! : 'user@freshbasket.com');
     int avatarIdx = int.tryParse(savedData['avatar'] ?? '0') ?? 0;
     if (avatarIdx >= AvatarConstants.colors.length) avatarIdx = 0;
-    final customImg = savedData['customImage'];
+    final customImg = savedData['customImage'] ?? savedData['profileImage'];
 
     if (mounted) {
       setState(() {
@@ -79,15 +78,6 @@ class _AccountScreenState extends State<AccountScreen> {
       hasCustomImage: _customImage != null && _customImage!.isNotEmpty,
       onImagePicked: (base64Image) async {
         await AccountStorageService().saveUserProfile(customImage: base64Image);
-        final user = FirebaseAuth.instance.currentUser;
-        if (user != null) {
-          try {
-            await FirebaseFirestore.instance
-                .collection('users')
-                .doc(user.uid)
-                .set({'profileImage': base64Image}, SetOptions(merge: true));
-          } catch (_) {}
-        }
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -106,15 +96,6 @@ class _AccountScreenState extends State<AccountScreen> {
       },
       onRemovePhoto: () async {
         await AccountStorageService().saveUserProfile(clearCustomImage: true);
-        final user = FirebaseAuth.instance.currentUser;
-        if (user != null) {
-          try {
-            await FirebaseFirestore.instance
-                .collection('users')
-                .doc(user.uid)
-                .update({'profileImage': FieldValue.delete()});
-          } catch (_) {}
-        }
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(

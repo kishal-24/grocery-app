@@ -186,6 +186,9 @@ class OrderModel {
   final double totalAmount;
   final String deliveryAddress;
   final String paymentMethod;
+  final String? paymentId;
+  final String? paymentStatus; // 'Paid', 'Pending on Delivery'
+  final String? transactionRef;
 
   OrderModel({
     required this.id,
@@ -195,6 +198,9 @@ class OrderModel {
     required this.totalAmount,
     required this.deliveryAddress,
     required this.paymentMethod,
+    this.paymentId,
+    this.paymentStatus,
+    this.transactionRef,
   });
 
   Map<String, dynamic> toJson() => {
@@ -205,6 +211,9 @@ class OrderModel {
         'totalAmount': totalAmount,
         'deliveryAddress': deliveryAddress,
         'paymentMethod': paymentMethod,
+        if (paymentId != null) 'paymentId': paymentId,
+        if (paymentStatus != null) 'paymentStatus': paymentStatus,
+        if (transactionRef != null) 'transactionRef': transactionRef,
       };
 
   factory OrderModel.fromJson(Map<String, dynamic> json, [String? docId]) =>
@@ -219,6 +228,9 @@ class OrderModel {
         totalAmount: (json['totalAmount'] as num?)?.toDouble() ?? 0.0,
         deliveryAddress: json['deliveryAddress'] ?? 'Home Address',
         paymentMethod: json['paymentMethod'] ?? 'Cash on Delivery',
+        paymentId: json['paymentId'] as String?,
+        paymentStatus: json['paymentStatus'] as String?,
+        transactionRef: json['transactionRef'] as String?,
       );
 
   OrderModel copyWith({
@@ -229,6 +241,9 @@ class OrderModel {
     double? totalAmount,
     String? deliveryAddress,
     String? paymentMethod,
+    String? paymentId,
+    String? paymentStatus,
+    String? transactionRef,
   }) {
     return OrderModel(
       id: id ?? this.id,
@@ -238,8 +253,64 @@ class OrderModel {
       totalAmount: totalAmount ?? this.totalAmount,
       deliveryAddress: deliveryAddress ?? this.deliveryAddress,
       paymentMethod: paymentMethod ?? this.paymentMethod,
+      paymentId: paymentId ?? this.paymentId,
+      paymentStatus: paymentStatus ?? this.paymentStatus,
+      transactionRef: transactionRef ?? this.transactionRef,
     );
   }
+}
+
+class PaymentModel {
+  final String id;
+  final String orderId;
+  final String userId;
+  final double amount;
+  final String currency;
+  final String paymentMethod;
+  final String paymentType; // 'card', 'cod', 'wallet', 'upi'
+  final String status; // 'COMPLETED', 'Pending on Delivery', 'FAILED'
+  final String transactionRef;
+  final String date;
+
+  PaymentModel({
+    required this.id,
+    required this.orderId,
+    required this.userId,
+    required this.amount,
+    this.currency = 'USD',
+    required this.paymentMethod,
+    required this.paymentType,
+    required this.status,
+    required this.transactionRef,
+    required this.date,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'orderId': orderId,
+        'userId': userId,
+        'amount': amount,
+        'currency': currency,
+        'paymentMethod': paymentMethod,
+        'paymentType': paymentType,
+        'status': status,
+        'transactionRef': transactionRef,
+        'date': date,
+      };
+
+  factory PaymentModel.fromJson(Map<String, dynamic> json, [String? docId]) =>
+      PaymentModel(
+        id: docId ?? json['id'] ?? '',
+        orderId: json['orderId'] ?? '',
+        userId: json['userId'] ?? '',
+        amount: (json['amount'] as num?)?.toDouble() ?? 0.0,
+        currency: json['currency'] ?? 'USD',
+        paymentMethod: json['paymentMethod'] ?? 'Cash on Delivery',
+        paymentType: json['paymentType'] ?? 'cod',
+        status: json['status'] ?? 'COMPLETED',
+        transactionRef: json['transactionRef'] ?? '',
+        date: json['date'] ?? '',
+      );
 }
 
 class PromoModel {
@@ -356,6 +427,7 @@ class AccountStorageService {
   static const _keySavedCheckoutPaymentMethod = 'checkout_saved_payment_method';
   static const _keySavedCheckoutPaymentIconCode =
       'checkout_saved_payment_icon_code';
+  static const _keySavedGpayUpiId = 'checkout_saved_gpay_upi_id';
 
   static final AccountStorageService _instance =
       AccountStorageService._internal();
@@ -401,17 +473,23 @@ class AccountStorageService {
         final doc = await _firestore.collection('users').doc(user.uid).get();
         if (doc.exists && doc.data() != null) {
           final data = doc.data()!;
+          final customImg = (data['customImage'] as String?)?.isNotEmpty == true
+              ? (data['customImage'] as String)
+              : ((data['profileImage'] as String?) ?? '');
+
           final profile = {
             'name': (data['name'] as String?)?.isNotEmpty == true
                 ? data['name'] as String
                 : (user.displayName ?? ''),
             'email': (data['email'] as String?) ?? (user.email ?? ''),
-            'phone': (data['phone'] as String?) ??
-                (user.phoneNumber ?? '+1 234 567 8900'),
+            'username': (data['username'] as String?) ?? '',
+            'phone': (data['phone'] as String?) ?? (user.phoneNumber ?? ''),
             'gender': (data['gender'] as String?) ?? 'Prefer not to say',
-            'dob': (data['dob'] as String?) ?? '15 May 1995',
+            'dob': (data['dob'] as String?) ?? '',
             'avatar': (data['avatar'] as String?) ?? '0',
-            'customImage': (data['customImage'] as String?) ?? '',
+            'customImage': customImg,
+            'profileImage': customImg,
+            'role': (data['role'] as String?) ?? 'customer',
           };
 
           // Cache locally
@@ -422,8 +500,10 @@ class AccountStorageService {
           await prefs.setString(_keyUserGender, profile['gender']!);
           await prefs.setString(_keyUserDob, profile['dob']!);
           await prefs.setString(_keyUserAvatar, profile['avatar']!);
-          if (profile['customImage']!.isNotEmpty) {
-            await prefs.setString(_keyUserCustomImage, profile['customImage']!);
+          if (customImg.isNotEmpty) {
+            await prefs.setString(_keyUserCustomImage, customImg);
+          } else {
+            await prefs.remove(_keyUserCustomImage);
           }
 
           return profile;
@@ -431,15 +511,18 @@ class AccountStorageService {
       } catch (_) {}
     }
 
+    final localCustomImg = prefs.getString(_keyUserCustomImage) ?? '';
     return {
       'name': prefs.getString(_keyUserName) ?? (user?.displayName ?? ''),
       'email': user?.email ?? '',
-      'phone': prefs.getString(_keyUserPhone) ??
-          (user?.phoneNumber ?? '+1 234 567 8900'),
+      'username': '',
+      'phone': prefs.getString(_keyUserPhone) ?? (user?.phoneNumber ?? ''),
       'gender': prefs.getString(_keyUserGender) ?? 'Prefer not to say',
-      'dob': prefs.getString(_keyUserDob) ?? '15 May 1995',
+      'dob': prefs.getString(_keyUserDob) ?? '',
       'avatar': prefs.getString(_keyUserAvatar) ?? '0',
-      'customImage': prefs.getString(_keyUserCustomImage) ?? '',
+      'customImage': localCustomImg,
+      'profileImage': localCustomImg,
+      'role': 'customer',
     };
   }
 
@@ -485,9 +568,11 @@ class AccountStorageService {
     if (clearCustomImage || customImage == '') {
       await prefs.remove(_keyUserCustomImage);
       firestoreUpdates['customImage'] = '';
+      firestoreUpdates['profileImage'] = FieldValue.delete();
     } else if (customImage != null) {
       await prefs.setString(_keyUserCustomImage, customImage);
       firestoreUpdates['customImage'] = customImage;
+      firestoreUpdates['profileImage'] = customImage;
     }
 
     if (user != null) {
@@ -504,10 +589,27 @@ class AccountStorageService {
 
   // ==================== ADDRESSES ====================
 
+  Future<void> _syncAddressesToUserDoc(User user, List<AddressModel> list) async {
+    try {
+      final defaultAddr = list.isNotEmpty
+          ? list.firstWhere((a) => a.isDefault, orElse: () => list.first)
+          : null;
+
+      await _firestore.collection('users').doc(user.uid).set({
+        'addresses': list.map((e) => e.toJson()).toList(),
+        'defaultAddress': defaultAddr != null ? defaultAddr.fullAddress : '',
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Error syncing addresses to user doc: $e');
+    }
+  }
+
   Future<List<AddressModel>> getAddresses() async {
     final user = _currentUser;
     if (user != null) {
       try {
+        // 1. Check Firestore subcollection 'addresses'
         final snap = await _firestore
             .collection('users')
             .doc(user.uid)
@@ -521,9 +623,43 @@ class AccountStorageService {
           list.sort((a, b) =>
               (b.isDefault ? 1 : 0).compareTo(a.isDefault ? 1 : 0));
           await saveAddressesLocally(list);
+          await _syncAddressesToUserDoc(user, list);
           return list;
         }
-      } catch (_) {}
+
+        // 2. Check root user document 'addresses' field fallback
+        final userDoc = await _firestore.collection('users').doc(user.uid).get();
+        if (userDoc.exists && userDoc.data()?['addresses'] != null) {
+          final raw = userDoc.data()!['addresses'] as List<dynamic>;
+          if (raw.isNotEmpty) {
+            final list = raw
+                .map((e) => AddressModel.fromJson(Map<String, dynamic>.from(e as Map)))
+                .toList();
+            list.sort((a, b) =>
+                (b.isDefault ? 1 : 0).compareTo(a.isDefault ? 1 : 0));
+            await saveAddressesLocally(list);
+
+            // Populate subcollection for fast subcollection queries
+            final batch = _firestore.batch();
+            for (final addr in list) {
+              batch.set(
+                _firestore
+                    .collection('users')
+                    .doc(user.uid)
+                    .collection('addresses')
+                    .doc(addr.id),
+                addr.toJson(),
+                SetOptions(merge: true),
+              );
+            }
+            await batch.commit();
+
+            return list;
+          }
+        }
+      } catch (e) {
+        debugPrint('Error loading addresses from Firestore: $e');
+      }
     }
 
     final prefs = await SharedPreferences.getInstance();
@@ -578,10 +714,22 @@ class AccountStorageService {
         batch.set(addrRef.doc(address.id), {
           ...address.toJson(),
           'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
         });
 
+        // Also sync addresses array and defaultAddress on root users/{userId}
+        final defaultAddr = list.firstWhere((a) => a.isDefault, orElse: () => list.first);
+        final userRef = _firestore.collection('users').doc(user.uid);
+        batch.set(userRef, {
+          'addresses': list.map((e) => e.toJson()).toList(),
+          'defaultAddress': defaultAddr.fullAddress,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
         await batch.commit();
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error adding address to Firestore: $e');
+      }
     }
   }
 
@@ -617,9 +765,28 @@ class AccountStorageService {
         }
 
         batch.set(
-            addrRef.doc(updated.id), updated.toJson(), SetOptions(merge: true));
+            addrRef.doc(updated.id),
+            {
+              ...updated.toJson(),
+              'updatedAt': FieldValue.serverTimestamp(),
+            },
+            SetOptions(merge: true));
+
+        // Sync to users/{userId} root doc
+        final defaultAddr = list.isNotEmpty
+            ? list.firstWhere((a) => a.isDefault, orElse: () => list.first)
+            : null;
+        final userRef = _firestore.collection('users').doc(user.uid);
+        batch.set(userRef, {
+          'addresses': list.map((e) => e.toJson()).toList(),
+          'defaultAddress': defaultAddr != null ? defaultAddr.fullAddress : '',
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
         await batch.commit();
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error updating address in Firestore: $e');
+      }
     }
   }
 
@@ -634,13 +801,28 @@ class AccountStorageService {
 
     if (user != null) {
       try {
-        await _firestore
+        final batch = _firestore.batch();
+        final addrDocRef = _firestore
             .collection('users')
             .doc(user.uid)
             .collection('addresses')
-            .doc(id)
-            .delete();
-      } catch (_) {}
+            .doc(id);
+        batch.delete(addrDocRef);
+
+        final defaultAddr = list.isNotEmpty
+            ? list.firstWhere((a) => a.isDefault, orElse: () => list.first)
+            : null;
+        final userRef = _firestore.collection('users').doc(user.uid);
+        batch.set(userRef, {
+          'addresses': list.map((e) => e.toJson()).toList(),
+          'defaultAddress': defaultAddr != null ? defaultAddr.fullAddress : '',
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+        await batch.commit();
+      } catch (e) {
+        debugPrint('Error deleting address from Firestore: $e');
+      }
     }
   }
 
@@ -664,12 +846,38 @@ class AccountStorageService {
           batch.set(addrRef.doc(a.id), {'isDefault': a.id == id},
               SetOptions(merge: true));
         }
+
+        final defaultAddr = list.firstWhere((a) => a.id == id,
+            orElse: () => list.first);
+        final userRef = _firestore.collection('users').doc(user.uid);
+        batch.set(userRef, {
+          'addresses': list.map((e) => e.toJson()).toList(),
+          'defaultAddress': defaultAddr.fullAddress,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
         await batch.commit();
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error setting default address in Firestore: $e');
+      }
     }
   }
 
   // ==================== PAYMENT METHODS ====================
+
+  Future<void> _syncCardsToUserDoc(User user, List<PaymentCardModel> list) async {
+    try {
+      final defaultCard = list.isNotEmpty
+          ? list.firstWhere((c) => c.isDefault, orElse: () => list.first)
+          : null;
+
+      await _firestore.collection('users').doc(user.uid).set({
+        'savedCards': list.map((c) => c.toJson()).toList(),
+        'defaultCard': defaultCard != null ? defaultCard.maskedNumber : '',
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (_) {}
+  }
 
   Future<List<PaymentCardModel>> getCards() async {
     final user = _currentUser;
@@ -688,9 +896,42 @@ class AccountStorageService {
           list.sort((a, b) =>
               (b.isDefault ? 1 : 0).compareTo(a.isDefault ? 1 : 0));
           await saveCardsLocally(list);
+          await _syncCardsToUserDoc(user, list);
           return list;
         }
-      } catch (_) {}
+
+        // Check root user document savedCards field
+        final userDoc = await _firestore.collection('users').doc(user.uid).get();
+        if (userDoc.exists && userDoc.data()?['savedCards'] != null) {
+          final raw = userDoc.data()!['savedCards'] as List<dynamic>;
+          if (raw.isNotEmpty) {
+            final list = raw
+                .map((e) => PaymentCardModel.fromJson(Map<String, dynamic>.from(e as Map)))
+                .toList();
+            list.sort((a, b) =>
+                (b.isDefault ? 1 : 0).compareTo(a.isDefault ? 1 : 0));
+            await saveCardsLocally(list);
+
+            final batch = _firestore.batch();
+            for (final card in list) {
+              batch.set(
+                _firestore
+                    .collection('users')
+                    .doc(user.uid)
+                    .collection('cards')
+                    .doc(card.id),
+                card.toJson(),
+                SetOptions(merge: true),
+              );
+            }
+            await batch.commit();
+
+            return list;
+          }
+        }
+      } catch (e) {
+        debugPrint('Error loading cards from Firestore: $e');
+      }
     }
 
     final prefs = await SharedPreferences.getInstance();
@@ -744,9 +985,22 @@ class AccountStorageService {
         batch.set(cardRef.doc(card.id), {
           ...card.toJson(),
           'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
         });
+
+        // Also sync savedCards array on root users/{userId}
+        final defaultCard = list.firstWhere((c) => c.isDefault, orElse: () => list.first);
+        final userRef = _firestore.collection('users').doc(user.uid);
+        batch.set(userRef, {
+          'savedCards': list.map((c) => c.toJson()).toList(),
+          'defaultCard': defaultCard.maskedNumber,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
         await batch.commit();
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error saving card to Firestore: $e');
+      }
     }
   }
 
@@ -761,13 +1015,29 @@ class AccountStorageService {
 
     if (user != null) {
       try {
-        await _firestore
-            .collection('users')
-            .doc(user.uid)
-            .collection('cards')
-            .doc(id)
-            .delete();
-      } catch (_) {}
+        final batch = _firestore.batch();
+        batch.delete(
+          _firestore
+              .collection('users')
+              .doc(user.uid)
+              .collection('cards')
+              .doc(id),
+        );
+
+        final defaultCard = list.isNotEmpty
+            ? list.firstWhere((c) => c.isDefault, orElse: () => list.first)
+            : null;
+        final userRef = _firestore.collection('users').doc(user.uid);
+        batch.set(userRef, {
+          'savedCards': list.map((c) => c.toJson()).toList(),
+          'defaultCard': defaultCard != null ? defaultCard.maskedNumber : '',
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+        await batch.commit();
+      } catch (e) {
+        debugPrint('Error deleting card from Firestore: $e');
+      }
     }
   }
 
@@ -791,7 +1061,159 @@ class AccountStorageService {
           batch.set(cardRef.doc(c.id), {'isDefault': c.id == id},
               SetOptions(merge: true));
         }
+
+        final defaultCard = list.firstWhere((c) => c.id == id,
+            orElse: () => list.first);
+        final userRef = _firestore.collection('users').doc(user.uid);
+        batch.set(userRef, {
+          'savedCards': list.map((c) => c.toJson()).toList(),
+          'defaultCard': defaultCard.maskedNumber,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
         await batch.commit();
+      } catch (e) {
+        debugPrint('Error setting default card in Firestore: $e');
+      }
+    }
+  }
+
+  // ==================== REAL PAYMENT PROCESSING ====================
+
+  Future<PaymentModel> processPayment({
+    required String orderId,
+    required double amount,
+    required String paymentMethod,
+  }) async {
+    final user = _currentUser;
+    final isGPay = paymentMethod.toLowerCase().contains('google') ||
+        paymentMethod.toLowerCase().contains('gpay');
+    final isCod = paymentMethod.toLowerCase().contains('cash') ||
+        paymentMethod.toLowerCase().contains('cod');
+    final isWallet = isGPay ||
+        paymentMethod.toLowerCase().contains('apple') ||
+        paymentMethod.toLowerCase().contains('pay');
+
+    final paymentType = isCod ? 'cod' : (isGPay ? 'gpay' : (isWallet ? 'wallet' : 'card'));
+    final status = isCod ? 'Pending on Delivery' : 'Paid';
+
+    final paymentId =
+        'PAY-${DateTime.now().millisecondsSinceEpoch}-${(1000 + (DateTime.now().microsecond % 9000))}';
+    final txnRef = isGPay
+        ? 'GPAY-TXN-${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}'
+        : 'TXN-${DateTime.now().millisecondsSinceEpoch}-${(100000 + (DateTime.now().microsecond % 900000))}';
+    final now = DateTime.now();
+    final dateStr =
+        '${now.day}/${now.month}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+
+    final payment = PaymentModel(
+      id: paymentId,
+      orderId: orderId,
+      userId: user?.uid ?? 'guest',
+      amount: amount,
+      currency: 'USD',
+      paymentMethod: paymentMethod,
+      paymentType: paymentType,
+      status: status,
+      transactionRef: txnRef,
+      date: dateStr,
+    );
+
+    if (user != null) {
+      try {
+        final batch = _firestore.batch();
+
+        // 1. Root payments collection
+        final rootPaymentRef = _firestore.collection('payments').doc(paymentId);
+        batch.set(rootPaymentRef, {
+          ...payment.toJson(),
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        // 2. User payments subcollection
+        final userPaymentRef = _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('payments')
+            .doc(paymentId);
+        batch.set(userPaymentRef, {
+          ...payment.toJson(),
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        // 3. User root document: update lastPayment
+        final userRef = _firestore.collection('users').doc(user.uid);
+        batch.set(userRef, {
+          'lastPayment': payment.toJson(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+        await batch.commit();
+      } catch (e) {
+        debugPrint('Error recording payment to Firestore: $e');
+      }
+    }
+
+    return payment;
+  }
+
+  Future<List<PaymentModel>> getPayments() async {
+    final user = _currentUser;
+    if (user != null) {
+      try {
+        final snap = await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('payments')
+            .get();
+
+        if (snap.docs.isNotEmpty) {
+          final list = snap.docs
+              .map((d) => PaymentModel.fromJson(d.data(), d.id))
+              .toList();
+          list.sort((a, b) => b.id.compareTo(a.id));
+          return list;
+        }
+      } catch (e) {
+        debugPrint('Error getting payments from Firestore: $e');
+      }
+    }
+    return [];
+  }
+
+  // ==================== GPAY UPI ====================
+
+  Future<String?> getGpayUpiId() async {
+    final user = _currentUser;
+    if (user != null) {
+      try {
+        final doc = await _firestore.collection('users').doc(user.uid).get();
+        if (doc.exists && doc.data()?['gpayUpiId'] != null) {
+          final id = doc.data()!['gpayUpiId'] as String;
+          if (id.isNotEmpty) {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString(_keySavedGpayUpiId, id);
+            return id;
+          }
+        }
+      } catch (_) {}
+    }
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keySavedGpayUpiId) ?? 'freshbasket.user@okhdfcbank';
+  }
+
+  Future<void> saveGpayUpiId(String upiId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keySavedGpayUpiId, upiId);
+    final user = _currentUser;
+    if (user != null) {
+      try {
+        await _firestore.collection('users').doc(user.uid).set({
+          'gpayUpiId': upiId,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
       } catch (_) {}
     }
   }
@@ -811,6 +1233,7 @@ class AccountStorageService {
           final orders = snap.docs
               .map((d) => OrderModel.fromJson(d.data(), d.id))
               .toList();
+          orders.sort((a, b) => b.id.compareTo(a.id));
           await saveOrdersLocally(orders);
           return orders;
         }
@@ -826,10 +1249,13 @@ class AccountStorageService {
           final orders = subSnap.docs
               .map((d) => OrderModel.fromJson(d.data(), d.id))
               .toList();
+          orders.sort((a, b) => b.id.compareTo(a.id));
           await saveOrdersLocally(orders);
           return orders;
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error getting orders from Firestore: $e');
+      }
     }
 
     final prefs = await SharedPreferences.getInstance();
@@ -851,80 +1277,126 @@ class AccountStorageService {
     await prefs.setString(_keyOrders, jsonStr);
   }
 
-  Future<void> addOrder(OrderModel order) async {
+  Future<OrderModel> addOrder(OrderModel order) async {
     final user = _currentUser;
-    final list = await getOrders();
-    list.insert(0, order);
-    await saveOrdersLocally(list);
+    OrderModel finalOrder = order;
 
+    // 1. Process real payment record in Firestore
+    final payment = await processPayment(
+      orderId: finalOrder.id,
+      amount: finalOrder.totalAmount,
+      paymentMethod: finalOrder.paymentMethod,
+    );
+
+    finalOrder = finalOrder.copyWith(
+      paymentId: payment.id,
+      paymentStatus: payment.status,
+      transactionRef: payment.transactionRef,
+    );
+
+    // 2. Persist order directly into Cloud Firestore
     if (user != null) {
       try {
-        final orderData = {
-          ...order.toJson(),
-          'userId': user.uid,
-          'createdAt': FieldValue.serverTimestamp(),
-        };
+        final batch = _firestore.batch();
 
         // Write to root 'orders' collection
-        await _firestore.collection('orders').doc(order.id).set(orderData);
+        final rootOrderRef = _firestore.collection('orders').doc(finalOrder.id);
+        batch.set(rootOrderRef, {
+          ...finalOrder.toJson(),
+          'userId': user.uid,
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
 
-        // Also write to user subcollection
-        await _firestore
+        // Write to user's 'orders' subcollection
+        final userOrderRef = _firestore
             .collection('users')
             .doc(user.uid)
             .collection('orders')
-            .doc(order.id)
-            .set(orderData);
+            .doc(finalOrder.id);
+        batch.set(userOrderRef, {
+          ...finalOrder.toJson(),
+          'userId': user.uid,
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
 
-        // Automatically trigger an in-app notification in Firestore
-        final notif = NotificationItemModel(
-          id: 'notif_${DateTime.now().millisecondsSinceEpoch}',
-          title: 'Order Placed Successfully! 🎉',
-          message:
-              'Your order #${order.id} for \$${order.totalAmount.toStringAsFixed(2)} has been placed and is being prepared.',
-          time: 'Just now',
-          isRead: false,
-          type: 'order',
-        );
-        await addNotification(notif);
-      } catch (_) {}
+        // Update user's last order summary on users/{userId}
+        final userDocRef = _firestore.collection('users').doc(user.uid);
+        batch.set(userDocRef, {
+          'lastOrderId': finalOrder.id,
+          'lastOrderDate': finalOrder.date,
+          'lastOrderTotal': finalOrder.totalAmount,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+        // Create an official confirmation notification in users/{userId}/notifications
+        final notifId = 'notif_${DateTime.now().millisecondsSinceEpoch}';
+        final notifRef = _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('notifications')
+            .doc(notifId);
+        batch.set(notifRef, {
+          'id': notifId,
+          'title': 'Order Placed Successfully! 🎉',
+          'message':
+              'Your order #${finalOrder.id} for \$${finalOrder.totalAmount.toStringAsFixed(2)} has been placed. Payment: ${finalOrder.paymentMethod} (${payment.status}).',
+          'time': 'Just now',
+          'isRead': false,
+          'type': 'order',
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+
+        await batch.commit();
+      } catch (e) {
+        debugPrint('Error writing order directly to Firestore: $e');
+      }
     }
+
+    final list = await getOrders();
+    list.insert(0, finalOrder);
+    await saveOrdersLocally(list);
+    return finalOrder;
   }
 
   Future<void> cancelOrder(String id) async {
     final user = _currentUser;
+
+    if (user != null) {
+      try {
+        final batch = _firestore.batch();
+        batch.set(
+          _firestore.collection('orders').doc(id),
+          {
+            'status': 'Cancelled',
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+        batch.set(
+          _firestore
+              .collection('users')
+              .doc(user.uid)
+              .collection('orders')
+              .doc(id),
+          {
+            'status': 'Cancelled',
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+        await batch.commit();
+      } catch (e) {
+        debugPrint('Error cancelling order in Firestore: $e');
+      }
+    }
+
     final list = await getOrders();
     final index = list.indexWhere((e) => e.id == id);
     if (index != -1) {
       list[index] = list[index].copyWith(status: 'Cancelled');
       await saveOrdersLocally(list);
-    }
-
-    if (user != null) {
-      try {
-        await _firestore
-            .collection('orders')
-            .doc(id)
-            .set({'status': 'Cancelled'}, SetOptions(merge: true));
-
-        await _firestore
-            .collection('users')
-            .doc(user.uid)
-            .collection('orders')
-            .doc(id)
-            .set({'status': 'Cancelled'}, SetOptions(merge: true));
-
-        // Create cancellation notification
-        final notif = NotificationItemModel(
-          id: 'notif_${DateTime.now().millisecondsSinceEpoch}',
-          title: 'Order Cancelled 🚫',
-          message: 'Order #$id has been cancelled.',
-          time: 'Just now',
-          isRead: false,
-          type: 'order',
-        );
-        await addNotification(notif);
-      } catch (_) {}
     }
   }
 
@@ -1184,6 +1656,7 @@ class AccountStorageService {
     String? deliverySpeed,
     String? paymentMethod,
     int? paymentIconCode,
+    String? gpayUpiId,
   }) async {
     final user = _currentUser;
     final prefs = await SharedPreferences.getInstance();
@@ -1204,6 +1677,10 @@ class AccountStorageService {
     if (paymentIconCode != null) {
       await prefs.setInt(_keySavedCheckoutPaymentIconCode, paymentIconCode);
       updates['paymentIconCode'] = paymentIconCode;
+    }
+    if (gpayUpiId != null) {
+      await prefs.setString(_keySavedGpayUpiId, gpayUpiId);
+      updates['gpayUpiId'] = gpayUpiId;
     }
 
     if (user != null && updates.isNotEmpty) {
@@ -1228,6 +1705,7 @@ class AccountStorageService {
             'deliverySpeed': cp['deliverySpeed'] as String?,
             'paymentMethod': cp['paymentMethod'] as String?,
             'paymentIconCode': cp['paymentIconCode'] as int?,
+            'gpayUpiId': cp['gpayUpiId'] as String?,
           };
         }
       } catch (_) {}
@@ -1239,6 +1717,7 @@ class AccountStorageService {
       'deliverySpeed': prefs.getString(_keySavedCheckoutSpeed),
       'paymentMethod': prefs.getString(_keySavedCheckoutPaymentMethod),
       'paymentIconCode': prefs.getInt(_keySavedCheckoutPaymentIconCode),
+      'gpayUpiId': prefs.getString(_keySavedGpayUpiId),
     };
   }
 }

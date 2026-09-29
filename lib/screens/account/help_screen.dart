@@ -5,13 +5,11 @@ class HelpScreen extends StatefulWidget {
   const HelpScreen({super.key});
 
   @override
-  State<HelpScreen> createState() => _HelpScreenState();
+  State<HelpScreen> createState() =>_HelpScreenState();
 }
-
 class _HelpScreenState extends State<HelpScreen> {
   final _searchController = TextEditingController();
   String _searchQuery = '';
-
   final List<Map<String, String>> _allFaqs = [
     {
       'question': 'How do I track my active order?',

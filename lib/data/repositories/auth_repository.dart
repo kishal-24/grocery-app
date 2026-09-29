@@ -55,12 +55,21 @@ class AuthRepository {
         return email;
       }
 
-      final querySnap = await FirebaseFirestore.instance
+      var querySnap = await FirebaseFirestore.instance
           .collection('users')
-          .where('username_lowercase', isEqualTo: lower)
+          .where('usernameLower', isEqualTo: lower)
           .limit(1)
           .get()
           .timeout(const Duration(seconds: 4));
+
+      if (querySnap.docs.isEmpty) {
+        querySnap = await FirebaseFirestore.instance
+            .collection('users')
+            .where('username_lowercase', isEqualTo: lower)
+            .limit(1)
+            .get()
+            .timeout(const Duration(seconds: 4));
+      }
 
       if (querySnap.docs.isNotEmpty) {
         final email = querySnap.docs.first.data()['email'] as String?;
@@ -135,6 +144,23 @@ class AuthRepository {
           }, SetOptions(merge: true));
         } catch (_) {}
       }
+
+      if (user != null) {
+        try {
+          final profileDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .get()
+              .timeout(const Duration(seconds: 4));
+          if (!profileDoc.exists) {
+            await _userRepository.createUserProfile(
+              user: user,
+              username: user.displayName,
+              name: user.displayName,
+            );
+          }
+        } catch (_) {}
+      }
     } catch (_) {}
 
     return credential;
@@ -175,10 +201,11 @@ class AuthRepository {
       await user.reload();
     }
 
-    // Create production Firestore user profile
+    // Create production Firestore user profile with complete details
     await _userRepository.createUserProfile(
       user: user,
       username: cleanUsername,
+      name: cleanUsername,
     );
 
     // Keep the existing local cache for now.

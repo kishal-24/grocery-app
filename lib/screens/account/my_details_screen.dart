@@ -57,13 +57,13 @@ class _MyDetailsScreenState extends State<MyDetailsScreen> {
     }
 
     _nameController.text = name;
-    _emailController.text = user?.email ?? 'user@freshbasket.com';
-    _phoneController.text = savedData['phone'] ?? '+1 555 123 4567';
-    _dobController.text = savedData['dob'] ?? '15 May 1995';
-    _selectedGender = savedData['gender'] ?? 'Prefer not to say';
+    _emailController.text = user?.email ?? (savedData['email']?.isNotEmpty == true ? savedData['email']! : '');
+    _phoneController.text = savedData['phone'] ?? '';
+    _dobController.text = savedData['dob'] ?? '';
+    _selectedGender = savedData['gender']?.isNotEmpty == true ? savedData['gender']! : 'Prefer not to say';
     _selectedAvatarIndex = int.tryParse(savedData['avatar'] ?? '0') ?? 0;
     if (_selectedAvatarIndex >= _avatarColors.length) _selectedAvatarIndex = 0;
-    final customImg = savedData['customImage'];
+    final customImg = savedData['customImage'] ?? savedData['profileImage'];
     _customImage = (customImg != null && customImg.isNotEmpty) ? customImg : null;
 
     if (mounted) {
@@ -125,7 +125,7 @@ class _MyDetailsScreenState extends State<MyDetailsScreen> {
         } catch (_) {}
       }
 
-      // Save to AccountStorageService
+      // Save all profile details to AccountStorageService & Firestore
       await AccountStorageService().saveUserProfile(
         name: newName,
         phone: newPhone,
@@ -135,22 +135,6 @@ class _MyDetailsScreenState extends State<MyDetailsScreen> {
         customImage: _customImage,
         clearCustomImage: _customImage == null || _customImage!.isEmpty,
       );
-
-      if (user != null) {
-        try {
-          if (_customImage != null && _customImage!.isNotEmpty) {
-            await FirebaseFirestore.instance
-                .collection('users')
-                .doc(user.uid)
-                .set({'profileImage': _customImage}, SetOptions(merge: true));
-          } else {
-            await FirebaseFirestore.instance
-                .collection('users')
-                .doc(user.uid)
-                .update({'profileImage': FieldValue.delete()});
-          }
-        } catch (_) {}
-      }
 
       if (mounted) {
         setState(() => _isSaving = false);
@@ -183,10 +167,29 @@ class _MyDetailsScreenState extends State<MyDetailsScreen> {
   }
 
   Future<void> _selectDate() async {
+    DateTime initial = DateTime(2000, 1, 1);
+    if (_dobController.text.trim().isNotEmpty) {
+      try {
+        final parts = _dobController.text.trim().split(' ');
+        if (parts.length == 3) {
+          final day = int.tryParse(parts[0]);
+          const months = [
+            'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+          ];
+          final monthIndex = months.indexOf(parts[1]);
+          final year = int.tryParse(parts[2]);
+          if (day != null && monthIndex != -1 && year != null) {
+            initial = DateTime(year, monthIndex + 1, day);
+          }
+        }
+      } catch (_) {}
+    }
+
     final picked = await showDatePicker(
       context: context,
-      initialDate: DateTime(1995, 5, 15),
-      firstDate: DateTime(1940),
+      initialDate: initial,
+      firstDate: DateTime(1920),
       lastDate: DateTime.now(),
       builder: (context, child) {
         return Theme(

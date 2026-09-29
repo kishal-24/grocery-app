@@ -272,6 +272,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       itemBuilder: (context, index) {
                         return ProductCard(
                           product: exclusiveProducts[index],
+                          heroTag: 'exclusive_${exclusiveProducts[index].id}',
                         );
                       },
                     ),
@@ -324,6 +325,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       itemBuilder: (context, index) {
                         return ProductCard(
                           product: bestSellingProducts[index],
+                          heroTag: 'best_${bestSellingProducts[index].id}',
                         );
                       },
                     ),
@@ -455,6 +457,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       itemBuilder: (context, index) {
                         return ProductCard(
                           product: beverages[index],
+                          heroTag: 'bev_${beverages[index].id}',
                         );
                       },
                     ),
