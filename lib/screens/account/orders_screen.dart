@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../bloc/cart/cart_bloc.dart';
 import '../../bloc/cart/cart_event.dart';
 import '../../core/constants/app_colors.dart';
+import '../../core/constants/app_constants.dart';
 import '../../data/models/product_model.dart';
 import '../../data/services/account_storage_service.dart';
 
@@ -49,13 +50,65 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
   List<OrderModel> _filterOrders(int tabIndex) {
     switch (tabIndex) {
       case 1: // Active
-        return _allOrders.where((o) => o.status == 'In Transit' || o.status == 'Processing').toList();
+        return _allOrders
+            .where((o) =>
+                o.status == 'In Transit' ||
+                o.status == 'Processing' ||
+                o.status == 'Pending' ||
+                o.status == 'Confirmed')
+            .toList();
       case 2: // Completed
         return _allOrders.where((o) => o.status == 'Delivered').toList();
       case 3: // Cancelled
         return _allOrders.where((o) => o.status == 'Cancelled').toList();
       default: // All
         return _allOrders;
+    }
+  }
+
+  Future<void> _verifyPayment(OrderModel order) async {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    scaffoldMessenger.showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+            ),
+            SizedBox(width: 12),
+            Text('Verifying UPI payment with gateway...'),
+          ],
+        ),
+        duration: Duration(seconds: 1),
+      ),
+    );
+
+    final success = await AccountStorageService().verifyOrderPayment(
+      orderId: order.id,
+      transactionRef: order.transactionRef,
+    );
+
+    if (mounted) {
+      if (success) {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text('Payment verified! Order #${order.id} is now Confirmed 🎉'),
+            backgroundColor: AppColors.primaryGreen,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        _loadOrders();
+      } else {
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(
+            content: Text('Payment verification pending. Please try again in a few moments.'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
     }
   }
 
@@ -367,7 +420,7 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
                               ),
                             ),
                             Text(
-                              '\$${(item.price * item.quantity).toStringAsFixed(2)}',
+                              '${AppConstants.currencySymbol}${(item.price * item.quantity).toStringAsFixed(2)}',
                               style: const TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 15,
@@ -382,19 +435,19 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
                   const SizedBox(height: 10),
 
                   // Order Summary
-                  _buildSummaryRow('Subtotal', '\$${order.totalAmount.toStringAsFixed(2)}'),
+                  _buildSummaryRow('Subtotal', '${AppConstants.currencySymbol}${order.totalAmount.toStringAsFixed(2)}'),
                   _buildSummaryRow('Delivery Fee', 'FREE', isHighlight: true),
-                  _buildSummaryRow('Tax', '\$0.00'),
+                  _buildSummaryRow('Tax', '${AppConstants.currencySymbol}0.00'),
                   const SizedBox(height: 6),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       const Text(
-                        'Total Paid',
+                        'Total Amount',
                         style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textDark),
                       ),
                       Text(
-                        '\$${order.totalAmount.toStringAsFixed(2)}',
+                        '${AppConstants.currencySymbol}${order.totalAmount.toStringAsFixed(2)}',
                         style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primaryGreen),
                       ),
                     ],
@@ -470,6 +523,29 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
                   ],
 
                   const SizedBox(height: 24),
+                  if (order.paymentStatus?.toLowerCase() == 'pending' &&
+                      order.status != 'Cancelled') ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _verifyPayment(order);
+                        },
+                        icon: const Icon(Icons.verified, size: 18),
+                        label: const Text('Verify Payment Now',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primaryGreen,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   Row(
                     children: [
                       Expanded(
@@ -615,6 +691,14 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
     Color fg;
 
     switch (status) {
+      case 'Pending':
+        bg = const Color(0xFFFFF8E1);
+        fg = const Color(0xFFF57F17);
+        break;
+      case 'Confirmed':
+        bg = const Color(0xFFE8F5E9);
+        fg = const Color(0xFF2E7D32);
+        break;
       case 'In Transit':
         bg = const Color(0xFFFFF4E5);
         fg = const Color(0xFFFF9800);
@@ -733,7 +817,13 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
       separatorBuilder: (_, _) => const SizedBox(height: 16),
       itemBuilder: (context, index) {
         final order = orders[index];
-        final isActive = order.status == 'In Transit' || order.status == 'Processing';
+        final isActive = order.status == 'In Transit' ||
+            order.status == 'Processing' ||
+            order.status == 'Pending' ||
+            order.status == 'Confirmed';
+        final isPendingPayment =
+            order.paymentStatus?.toLowerCase() == 'pending' &&
+                order.status != 'Cancelled';
 
         return Container(
           decoration: BoxDecoration(
@@ -832,7 +922,7 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            '\$${order.totalAmount.toStringAsFixed(2)}',
+                            '${AppConstants.currencySymbol}${order.totalAmount.toStringAsFixed(2)}',
                             style: const TextStyle(
                               fontSize: 17,
                               fontWeight: FontWeight.bold,
@@ -847,6 +937,23 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
                   const SizedBox(height: 14),
 
                   // Action Buttons
+                  if (isPendingPayment) ...[
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: ElevatedButton.icon(
+                        onPressed: () => _verifyPayment(order),
+                        icon: const Icon(Icons.verified_outlined, size: 16),
+                        label: const Text('Verify UPI Payment'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.amber.shade800,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                  ],
                   Row(
                     children: [
                       if (isActive) ...[

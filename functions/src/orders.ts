@@ -150,7 +150,7 @@ export async function processCreateOrder(
         if (subtotal < minSpend) {
           throw new HttpsError(
             "failed-precondition",
-            `Promo code "${cleanCode}" requires a minimum spend of $${minSpend.toFixed(
+            `Promo code "${cleanCode}" requires a minimum spend of ₹${minSpend.toFixed(
               2
             )}.`
           );
@@ -182,9 +182,9 @@ export async function processCreateOrder(
       }
     }
 
-    // 3. Server Delivery Fee rule: Free if Pickup or subtotal >= $20, else $2.99
-    let deliveryFee = 2.99;
-    if (sanitizedSpeed.toLowerCase() === "pickup" || subtotal >= 20.0) {
+    // 3. Server Delivery Fee rule: Free if Pickup or subtotal >= ₹199, else ₹30.00
+    let deliveryFee = 30.0;
+    if (sanitizedSpeed.toLowerCase() === "pickup" || subtotal >= 199.0) {
       deliveryFee = 0.0;
     }
 
@@ -201,12 +201,16 @@ export async function processCreateOrder(
       .toUpperCase();
     const orderId = `ORD-${Date.now().toString().slice(-6)}-${randomSuffix}`;
 
+    const isCod = sanitizedPayment.toLowerCase().includes("cash") || sanitizedPayment.toLowerCase().includes("cod");
+    const initialPaymentStatus = isCod ? "Pending on Delivery" : "pending";
+
     const orderDocData: OrderDocument = {
       id: orderId,
       userId,
       date: "Today, Just now",
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      status: "Processing", // ALWAYS forced to 'Processing'
+      status: "Pending", // Initial status is always 'Pending'
+      paymentStatus: initialPaymentStatus,
       items: validatedItems,
       subtotal,
       discount,
@@ -239,10 +243,10 @@ export async function processCreateOrder(
       .doc(notifId);
     transaction.set(notifRef, {
       id: notifId,
-      title: "Order Placed Successfully! 🎉",
-      message: `Your order #${orderId} for $${totalAmount.toFixed(
+      title: "Order Placed (Payment Pending) ⏳",
+      message: `Your order #${orderId} for ₹${totalAmount.toFixed(
         2
-      )} has been placed and is being prepared.`,
+      )} has been recorded and is awaiting payment confirmation.`,
       time: "Just now",
       isRead: false,
       type: "order",
@@ -293,7 +297,7 @@ export async function processCancelOrder(
       );
     }
 
-    if (orderData.status !== "Processing") {
+    if (orderData.status !== "Processing" && orderData.status !== "Pending") {
       throw new HttpsError(
         "failed-precondition",
         `Order cannot be cancelled because it is already "${orderData.status}".`

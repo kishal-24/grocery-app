@@ -48,7 +48,9 @@ export interface OrderDocument {
   userId: string;
   date: string;
   createdAt: FirebaseFirestore.FieldValue;
-  status: "Processing" | "In Transit" | "Delivered" | "Cancelled";
+  status: "Pending" | "Confirmed" | "Processing" | "In Transit" | "Delivered" | "Cancelled";
+  paymentStatus?: string;
+  transactionRef?: string;
   items: ValidatedOrderItem[];
   subtotal: number;
   discount: number;

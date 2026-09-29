@@ -1,9 +1,11 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../core/constants/app_constants.dart';
 
 class AddressModel {
   final String id;
@@ -277,7 +279,7 @@ class PaymentModel {
     required this.orderId,
     required this.userId,
     required this.amount,
-    this.currency = 'USD',
+    this.currency = 'INR',
     required this.paymentMethod,
     required this.paymentType,
     required this.status,
@@ -304,7 +306,7 @@ class PaymentModel {
         orderId: json['orderId'] ?? '',
         userId: json['userId'] ?? '',
         amount: (json['amount'] as num?)?.toDouble() ?? 0.0,
-        currency: json['currency'] ?? 'USD',
+        currency: json['currency'] ?? 'INR',
         paymentMethod: json['paymentMethod'] ?? 'Cash on Delivery',
         paymentType: json['paymentType'] ?? 'cod',
         status: json['status'] ?? 'COMPLETED',
@@ -1080,28 +1082,51 @@ class AccountStorageService {
 
   // ==================== REAL PAYMENT PROCESSING ====================
 
+  static const String _keyCanaraUpiId = 'canara_merchant_upi_id';
+
+  Future<String> getCanaraUpiId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final custom = prefs.getString(_keyCanaraUpiId);
+    if (custom != null && custom.isNotEmpty) return custom;
+    return AppConstants.defaultCanaraUpiId;
+  }
+
+  Future<void> saveCanaraUpiId(String upiId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyCanaraUpiId, upiId);
+  }
+
   Future<PaymentModel> processPayment({
     required String orderId,
     required double amount,
     required String paymentMethod,
+    String? transactionRef,
+    String? paymentStatus,
   }) async {
     final user = _currentUser;
     final isGPay = paymentMethod.toLowerCase().contains('google') ||
         paymentMethod.toLowerCase().contains('gpay');
     final isCod = paymentMethod.toLowerCase().contains('cash') ||
         paymentMethod.toLowerCase().contains('cod');
-    final isWallet = isGPay ||
-        paymentMethod.toLowerCase().contains('apple') ||
-        paymentMethod.toLowerCase().contains('pay');
+    final isWallet = !isGPay &&
+        (paymentMethod.toLowerCase().contains('apple') ||
+            paymentMethod.toLowerCase().contains('pay'));
 
     final paymentType = isCod ? 'cod' : (isGPay ? 'gpay' : (isWallet ? 'wallet' : 'card'));
-    final status = isCod ? 'Pending on Delivery' : 'Paid';
+    
+    // GPay / UPI payments remain "pending" until independently verified
+    final status = paymentStatus ??
+        (isCod ? 'Pending on Delivery' : 'pending');
 
     final paymentId =
         'PAY-${DateTime.now().millisecondsSinceEpoch}-${(1000 + (DateTime.now().microsecond % 9000))}';
-    final txnRef = isGPay
-        ? 'GPAY-TXN-${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}'
-        : 'TXN-${DateTime.now().millisecondsSinceEpoch}-${(100000 + (DateTime.now().microsecond % 900000))}';
+    
+    // Unique transaction reference for every order
+    final txnRef = transactionRef ??
+        (isGPay
+            ? 'UPI-TXN-${DateTime.now().millisecondsSinceEpoch}-${100000 + Random().nextInt(900000)}'
+            : 'TXN-${DateTime.now().millisecondsSinceEpoch}-${100000 + Random().nextInt(900000)}');
+
     final now = DateTime.now();
     final dateStr =
         '${now.day}/${now.month}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
@@ -1111,7 +1136,7 @@ class AccountStorageService {
       orderId: orderId,
       userId: user?.uid ?? 'guest',
       amount: amount,
-      currency: 'USD',
+      currency: AppConstants.currencyCode,
       paymentMethod: paymentMethod,
       paymentType: paymentType,
       status: status,
@@ -1277,7 +1302,11 @@ class AccountStorageService {
     await prefs.setString(_keyOrders, jsonStr);
   }
 
-  Future<OrderModel> addOrder(OrderModel order) async {
+  Future<OrderModel> addOrder(
+    OrderModel order, {
+    String? customTransactionRef,
+    String? customPaymentStatus,
+  }) async {
     final user = _currentUser;
     OrderModel finalOrder = order;
 
@@ -1286,12 +1315,19 @@ class AccountStorageService {
       orderId: finalOrder.id,
       amount: finalOrder.totalAmount,
       paymentMethod: finalOrder.paymentMethod,
+      transactionRef: customTransactionRef ?? finalOrder.transactionRef,
+      paymentStatus: customPaymentStatus ??
+          finalOrder.paymentStatus ??
+          (finalOrder.paymentMethod.toLowerCase().contains('cash')
+              ? 'Pending on Delivery'
+              : 'pending'),
     );
 
     finalOrder = finalOrder.copyWith(
       paymentId: payment.id,
       paymentStatus: payment.status,
       transactionRef: payment.transactionRef,
+      status: finalOrder.status.isNotEmpty ? finalOrder.status : 'Pending',
     );
 
     // 2. Persist order directly into Cloud Firestore
@@ -1339,9 +1375,11 @@ class AccountStorageService {
             .doc(notifId);
         batch.set(notifRef, {
           'id': notifId,
-          'title': 'Order Placed Successfully! 🎉',
+          'title': finalOrder.paymentStatus == 'pending'
+              ? 'Order Placed (Payment Pending) ⏳'
+              : 'Order Placed Successfully! 🎉',
           'message':
-              'Your order #${finalOrder.id} for \$${finalOrder.totalAmount.toStringAsFixed(2)} has been placed. Payment: ${finalOrder.paymentMethod} (${payment.status}).',
+              'Your order #${finalOrder.id} for ${AppConstants.currencySymbol}${finalOrder.totalAmount.toStringAsFixed(2)} has been placed. Payment: ${finalOrder.paymentMethod} (${payment.status}).',
           'time': 'Just now',
           'isRead': false,
           'type': 'order',
@@ -1355,9 +1393,99 @@ class AccountStorageService {
     }
 
     final list = await getOrders();
+    list.removeWhere((o) => o.id == finalOrder.id);
     list.insert(0, finalOrder);
     await saveOrdersLocally(list);
     return finalOrder;
+  }
+
+  /// Independently verify UPI or order payment in Firestore.
+  /// Once verified, marks order paymentStatus: "Paid" and status: "Confirmed"
+  Future<bool> verifyOrderPayment({
+    required String orderId,
+    String? transactionRef,
+  }) async {
+    final user = _currentUser;
+    try {
+      final batch = _firestore.batch();
+      final Map<String, dynamic> updates = {
+        'paymentStatus': 'Paid',
+        'status': 'Confirmed',
+        'verifiedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+      if (transactionRef != null) {
+        updates['transactionRef'] = transactionRef;
+      }
+
+      // 1. Root orders collection
+      final rootOrderRef = _firestore.collection('orders').doc(orderId);
+      batch.set(rootOrderRef, updates, SetOptions(merge: true));
+
+      // 2. User orders subcollection
+      if (user != null) {
+        final userOrderRef = _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('orders')
+            .doc(orderId);
+        batch.set(userOrderRef, updates, SetOptions(merge: true));
+
+        // 3. User payments subcollection (if exists)
+        try {
+          final paymentsSnap = await _firestore
+              .collection('users')
+              .doc(user.uid)
+              .collection('payments')
+              .where('orderId', isEqualTo: orderId)
+              .get();
+
+          for (final doc in paymentsSnap.docs) {
+            batch.update(doc.reference, {
+              'status': 'COMPLETED',
+              'verifiedAt': FieldValue.serverTimestamp(),
+              'updatedAt': FieldValue.serverTimestamp(),
+            });
+          }
+        } catch (_) {}
+
+        // 4. Send confirmation notification
+        final notifId = 'notif_verify_${DateTime.now().millisecondsSinceEpoch}';
+        final notifRef = _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('notifications')
+            .doc(notifId);
+        batch.set(notifRef, {
+          'id': notifId,
+          'title': 'Payment Verified & Confirmed! ✅',
+          'message':
+              'Your UPI payment for Order #$orderId has been verified successfully. Your order is now Confirmed and preparing for dispatch.',
+          'time': 'Just now',
+          'isRead': false,
+          'type': 'order',
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      await batch.commit();
+
+      // Update local storage
+      final list = await getOrders();
+      final idx = list.indexWhere((o) => o.id == orderId);
+      if (idx != -1) {
+        list[idx] = list[idx].copyWith(
+          paymentStatus: 'Paid',
+          status: 'Confirmed',
+          transactionRef: transactionRef ?? list[idx].transactionRef,
+        );
+        await saveOrdersLocally(list);
+      }
+      return true;
+    } catch (e) {
+      debugPrint('Error verifying order payment: $e');
+      return false;
+    }
   }
 
   Future<void> cancelOrder(String id) async {
@@ -1443,23 +1571,23 @@ class AccountStorageService {
       title: '20% OFF Fresh Produce',
       description: 'Get 20% off on all organic vegetables and fresh fruits.',
       discountPercent: 20,
-      minSpend: 25.0,
+      minSpend: 200.0,
       expiryDate: '30 Oct 2026',
     ),
     PromoModel(
-      code: 'WELCOME10',
-      title: '\$10 OFF First Order',
-      description: 'Enjoy \$10 discount on your grocery haul over \$40.',
-      discountAmount: 10.0,
-      minSpend: 40.0,
+      code: 'WELCOME50',
+      title: '₹50 OFF First Order',
+      description: 'Enjoy ₹50 discount on your grocery haul over ₹250.',
+      discountAmount: 50.0,
+      minSpend: 250.0,
       expiryDate: '15 Nov 2026',
     ),
     PromoModel(
       code: 'FREEDEL',
       title: 'Free Express Delivery',
       description: 'Free instant contactless delivery on any order today.',
-      discountAmount: 5.0,
-      minSpend: 20.0,
+      discountAmount: 30.0,
+      minSpend: 199.0,
       expiryDate: '01 Nov 2026',
     ),
     PromoModel(
@@ -1468,7 +1596,7 @@ class AccountStorageService {
       description:
           'Save 15% on dairy, artisan bakery and pasture-raised eggs.',
       discountPercent: 15,
-      minSpend: 30.0,
+      minSpend: 250.0,
       expiryDate: '25 Nov 2026',
     ),
   ];

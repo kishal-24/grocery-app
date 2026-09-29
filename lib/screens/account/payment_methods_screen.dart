@@ -1011,10 +1011,11 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
                       Wrap(
                         spacing: 8,
                         children: [
+                          '@cnrb',
                           '@okhdfcbank',
-                          '@okaxis',
                           '@oksbi',
-                          '@okicici'
+                          '@okicici',
+                          '@paytm',
                         ].map((handle) {
                           return ActionChip(
                             label: Text(handle,

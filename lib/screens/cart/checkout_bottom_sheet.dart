@@ -1,9 +1,11 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../bloc/cart/cart_bloc.dart';
 import '../../bloc/cart/cart_event.dart';
 import '../../core/constants/app_colors.dart';
+import '../../core/constants/app_constants.dart';
 import '../../data/services/account_storage_service.dart';
 import '../account/delivery_address_screen.dart';
 import '../account/orders_screen.dart';
@@ -138,7 +140,7 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
       if (_appliedPromo?.code == 'FREEDEL') {
         return 0.0;
       }
-      return 3.99;
+      return 30.0;
     }
     return 0.0;
   }
@@ -164,7 +166,7 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
     if (!_deliveryChosen) return 'Select Method';
 
     final speedLabel = _deliverySpeed == 'Express'
-        ? 'Express (${_appliedPromo?.code == 'FREEDEL' ? 'Free' : '\$3.99'})'
+        ? 'Express (${_appliedPromo?.code == 'FREEDEL' ? 'Free' : '${AppConstants.currencySymbol}30.00'})'
         : _deliverySpeed == 'Pickup'
             ? 'Store Pickup'
             : 'Standard (Free)';
@@ -242,7 +244,7 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
                   ),
                   _buildSpeedOption(
                     title: 'Express Delivery',
-                    subtitle: 'Estimated 30-45 mins • \$3.99',
+                    subtitle: 'Estimated 30-45 mins • ${AppConstants.currencySymbol}30.00',
                     value: 'Express',
                     selectedValue: tempSpeed,
                     onSelected: (val) {
@@ -1142,7 +1144,7 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
               if (widget.subtotal < promo.minSpend) {
                 setModalState(() {
                   errorMessage =
-                      'Requires minimum spend of \$${promo.minSpend.toStringAsFixed(2)} (Current: \$${widget.subtotal.toStringAsFixed(2)})';
+                      'Requires minimum spend of ${AppConstants.currencySymbol}${promo.minSpend.toStringAsFixed(2)} (Current: ${AppConstants.currencySymbol}${widget.subtotal.toStringAsFixed(2)})';
                 });
                 return;
               }
@@ -1371,7 +1373,7 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
                                     ),
                                   ),
                                   Text(
-                                    'Min. spend: \$${p.minSpend.toStringAsFixed(0)} • Exp: ${p.expiryDate}',
+                                    'Min. spend: ${AppConstants.currencySymbol}${p.minSpend.toStringAsFixed(0)} • Exp: ${p.expiryDate}',
                                     style: TextStyle(
                                       fontSize: 11,
                                       color: isEligible
@@ -1394,7 +1396,7 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
                                     ? 'Remove'
                                     : (isEligible
                                         ? 'Apply'
-                                        : 'Min \$${p.minSpend.toInt()}'),
+                                        : 'Min ${AppConstants.currencySymbol}${p.minSpend.toInt()}'),
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.bold,
@@ -1486,121 +1488,85 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
         _selectedPaymentMethod?.contains('GPay') == true);
     final bool isOnlinePayment = (_selectedPaymentMethod != 'Cash on Delivery');
 
-    // Show realistic Payment Gateway Authorization Dialog
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (loadingCtx) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 68,
-                height: 68,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: isGPay
-                      ? const Color(0xFF4285F4).withValues(alpha: 0.1)
-                      : AppColors.primaryGreenLight.withValues(alpha: 0.5),
-                  shape: BoxShape.circle,
-                  border: isGPay
-                      ? Border.all(color: const Color(0xFF4285F4).withValues(alpha: 0.3))
-                      : null,
-                ),
-                child: isGPay
-                    ? Center(
-                        child: RichText(
-                          text: const TextSpan(
-                            style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: -1,
-                            ),
-                            children: [
-                              TextSpan(text: 'G', style: TextStyle(color: Color(0xFF4285F4))),
-                              TextSpan(text: 'P', style: TextStyle(color: Color(0xFFEA4335))),
-                              TextSpan(text: 'a', style: TextStyle(color: Color(0xFFFBBC05))),
-                              TextSpan(text: 'y', style: TextStyle(color: Color(0xFF34A853))),
-                            ],
-                          ),
-                        ),
-                      )
-                    : const CircularProgressIndicator(
-                        strokeWidth: 3.5,
-                        color: AppColors.primaryGreen,
-                      ),
-              ),
-              const SizedBox(height: 22),
-              Text(
-                isGPay
-                    ? 'Connecting Google Pay...'
-                    : (isOnlinePayment ? 'Authorizing Payment...' : 'Confirming Order...'),
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textDark,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                isGPay
-                    ? 'Verifying UPI handle ${_gpayUpiId ?? 'user@okhdfcbank'}...'
-                    : (isOnlinePayment
-                        ? 'Connecting to secure gateway via ${_selectedPaymentMethod ?? 'Card'}...'
-                        : 'Transmitting order to local dispatch center...'),
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 13, color: AppColors.textGrey),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: const [
-                  Icon(Icons.lock_outline, size: 14, color: AppColors.textGrey),
-                  SizedBox(width: 4),
-                  Text(
-                    '256-bit SSL Secure Encryption',
-                    style: TextStyle(fontSize: 11, color: AppColors.textGrey),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    final now = DateTime.now();
+    final orderId =
+        'ORD-${now.millisecondsSinceEpoch.toString().substring(7)}';
+    // Generate unique transaction reference for every order
+    final txnRef =
+        'UPI-TXN-${now.millisecondsSinceEpoch}-${100000 + Random().nextInt(900000)}';
 
-    // If GPay selected, attempt to trigger UPI intent via url_launcher
+    // Retrieve Canara UPI ID configured for store/merchant
+    final canaraUpiId = await AccountStorageService().getCanaraUpiId();
+
     if (isGPay) {
+      // 1. Create order in Firestore as paymentStatus: "pending"
+      final pendingOrder = OrderModel(
+        id: orderId,
+        date: 'Today, Just now',
+        status: 'Pending',
+        items: orderItems,
+        totalAmount: _finalTotal,
+        deliveryAddress: addressStr,
+        paymentMethod: 'Google Pay (UPI)',
+        paymentStatus: 'pending',
+        transactionRef: txnRef,
+      );
+
+      final createdOrder = await AccountStorageService().addOrder(
+        pendingOrder,
+        customTransactionRef: txnRef,
+        customPaymentStatus: 'pending',
+      );
+
+      await AccountStorageService().saveCheckoutPreferences(
+        addressId: _selectedAddress?.id,
+        deliverySpeed: _deliverySpeed,
+        paymentMethod: _selectedPaymentMethod,
+        paymentIconCode: _selectedPaymentIcon.codePoint,
+      );
+
+      // 2. Launch Google Pay directly using Canara UPI ID
+      final formattedAmount = _finalTotal.toStringAsFixed(2);
+      final encodedMerchant = Uri.encodeComponent(AppConstants.merchantName);
+      final encodedNote = Uri.encodeComponent('Order Payment $orderId');
+      final upiUri = Uri.parse(
+        'upi://pay?pa=$canaraUpiId&pn=$encodedMerchant&mc=${AppConstants.merchantCategoryCode}&tr=$txnRef&am=$formattedAmount&cu=INR&tn=$encodedNote',
+      );
+
       try {
-        final upiUri = Uri.parse(
-          'upi://pay?pa=freshbasket@okaxis&pn=FreshBasket%20Groceries&am=${_finalTotal.toStringAsFixed(2)}&cu=USD&tn=Order%20Payment',
-        );
         if (await canLaunchUrl(upiUri)) {
-          await launchUrl(upiUri, mode: LaunchMode.externalNonBrowserApplication);
+          await launchUrl(upiUri, mode: LaunchMode.externalApplication);
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error launching Google Pay UPI: $e');
+      }
+
+      // 3. Handle user's return from Google Pay: Dismiss sheet & show pending verification dialog
+      if (mounted) {
+        Navigator.pop(context);
+        _showPendingUpiOrderDialog(context, createdOrder, txnRef, canaraUpiId);
+      }
+      return;
     }
 
-    // Simulate authentic network handshake for online payment gateway
-    if (isOnlinePayment) {
-      await Future.delayed(const Duration(milliseconds: 950));
-    }
-
+    // Non-GPay checkout flow (Cash on Delivery / Card)
     final newOrder = OrderModel(
-      id: 'ORD-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
+      id: orderId,
       date: 'Today, Just now',
-      status: 'Processing',
+      status: isOnlinePayment ? 'Pending' : 'Processing',
       items: orderItems,
       totalAmount: _finalTotal,
       deliveryAddress: addressStr,
       paymentMethod: _selectedPaymentMethod ?? 'Cash on Delivery',
+      paymentStatus: isOnlinePayment ? 'pending' : 'Pending on Delivery',
+      transactionRef: txnRef,
     );
 
-    // Real Firestore transaction & payment generation
-    final createdOrder = await AccountStorageService().addOrder(newOrder);
+    final createdOrder = await AccountStorageService().addOrder(
+      newOrder,
+      customTransactionRef: txnRef,
+      customPaymentStatus: isOnlinePayment ? 'pending' : 'Pending on Delivery',
+    );
 
     await AccountStorageService().saveCheckoutPreferences(
       addressId: _selectedAddress?.id,
@@ -1610,13 +1576,380 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
     );
 
     if (mounted) {
-      // Dismiss gateway processing dialog
-      Navigator.of(context, rootNavigator: true).pop();
-      // Dismiss checkout bottom sheet
       Navigator.pop(context);
-      // Show order accepted confirmation dialog
       _showOrderAcceptedDialog(context, createdOrder);
     }
+  }
+
+  void _showPendingUpiOrderDialog(
+    BuildContext context,
+    OrderModel order,
+    String txnRef,
+    String canaraUpiId,
+  ) {
+    context.read<CartBloc>().add(const ClearCartEvent());
+
+    bool isVerifying = false;
+    bool isVerified = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return Dialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 26),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 76,
+                        height: 76,
+                        decoration: BoxDecoration(
+                          color: isVerified
+                              ? AppColors.primaryGreenLight
+                              : const Color(0xFFFFF3E0),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          isVerified
+                              ? Icons.check_circle_rounded
+                              : Icons.hourglass_top_rounded,
+                          color: isVerified
+                              ? AppColors.primaryGreen
+                              : const Color(0xFFF57C00),
+                          size: 48,
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        isVerified
+                            ? 'Payment Verified & Confirmed! 🎉'
+                            : 'Payment Pending Confirmation ⏳',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textDark,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Order #${order.id}',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primaryGreen,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: AppColors.cardBackground,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  'Payment Status',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.textGrey,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: isVerified
+                                        ? Colors.green.withValues(alpha: 0.12)
+                                        : Colors.orange.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        isVerified
+                                            ? Icons.check_circle
+                                            : Icons.schedule,
+                                        size: 13,
+                                        color: isVerified
+                                            ? Colors.green.shade700
+                                            : Colors.orange.shade800,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        isVerified ? 'Paid' : 'Pending',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                          color: isVerified
+                                              ? Colors.green.shade700
+                                              : Colors.orange.shade800,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  'Payment Method',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.textGrey,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                const Text(
+                                  'Google Pay (UPI)',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.textDark,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  'Payee Canara UPI',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.textGrey,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                Text(
+                                  canaraUpiId,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF1976D2),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  'UPI Txn Ref',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.textGrey,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                Flexible(
+                                  child: Text(
+                                    txnRef,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      fontFamily: 'monospace',
+                                      color: AppColors.textDark,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  'Total Payable',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.textGrey,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                Text(
+                                  '${AppConstants.currencySymbol}${order.totalAmount.toStringAsFixed(2)}',
+                                  style: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.primaryGreen,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE8F0FE),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.info_outline,
+                                size: 16, color: Color(0xFF1967D2)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                isVerified
+                                    ? 'Your payment was successfully confirmed! Order is now preparing for dispatch.'
+                                    : 'Your order is recorded in Firestore as "Pending". Once you finish paying in Google Pay, tap "Verify Payment" below.',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  color: Color(0xFF1967D2),
+                                  height: 1.3,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      if (!isVerified) ...[
+                        SizedBox(
+                          width: double.infinity,
+                          height: 50,
+                          child: ElevatedButton(
+                            onPressed: isVerifying
+                                ? null
+                                : () async {
+                                    setDialogState(() => isVerifying = true);
+                                    await Future.delayed(
+                                        const Duration(milliseconds: 600));
+                                    final success =
+                                        await AccountStorageService()
+                                            .verifyOrderPayment(
+                                      orderId: order.id,
+                                      transactionRef: txnRef,
+                                    );
+                                    setDialogState(() {
+                                      isVerifying = false;
+                                      if (success) {
+                                        isVerified = true;
+                                      }
+                                    });
+                                  },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primaryGreen,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            child: isVerifying
+                                ? const SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.5,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.verified, size: 18),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        'Verify Payment',
+                                        style: TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.pop(dialogContext);
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    const OrdersScreen(initialFilter: 'Active'),
+                              ),
+                            );
+                          },
+                          child: const Text(
+                            'Verify Later in My Orders',
+                            style: TextStyle(
+                              color: AppColors.textGrey,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ] else ...[
+                        SizedBox(
+                          width: double.infinity,
+                          height: 50,
+                          child: ElevatedButton(
+                            onPressed: () {
+                              Navigator.pop(dialogContext);
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      const OrdersScreen(initialFilter: 'Active'),
+                                ),
+                              );
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primaryGreen,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            child: const Text(
+                              'Track Order',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   void _showOrderAcceptedDialog(BuildContext context, OrderModel order) {
@@ -1792,7 +2125,7 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
                               ),
                             ),
                             Text(
-                              '\$${order.totalAmount.toStringAsFixed(2)}',
+                              '${AppConstants.currencySymbol}${order.totalAmount.toStringAsFixed(2)}',
                               style: const TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.bold,
@@ -1953,7 +2286,7 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
           _buildInteractiveCheckoutRow(
             label: 'Promo Code',
             value: _appliedPromo != null
-                ? '${_appliedPromo!.code} (-${_discountAmount > 0 ? '\$${_discountAmount.toStringAsFixed(2)}' : 'applied'})'
+                ? '${_appliedPromo!.code} (-${_discountAmount > 0 ? '${AppConstants.currencySymbol}${_discountAmount.toStringAsFixed(2)}' : 'applied'})'
                 : 'Pick discount',
             valueColor: _appliedPromo != null
                 ? AppColors.primaryGreen
@@ -1980,7 +2313,7 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
                             fontSize: 13, color: AppColors.textGrey),
                       ),
                       Text(
-                        '\$${widget.subtotal.toStringAsFixed(2)}',
+                        '${AppConstants.currencySymbol}${widget.subtotal.toStringAsFixed(2)}',
                         style: const TextStyle(
                             fontSize: 13, color: AppColors.textDark),
                       ),
@@ -1998,7 +2331,7 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
                       Text(
                         _deliveryFee == 0.0
                             ? 'FREE'
-                            : '\$${_deliveryFee.toStringAsFixed(2)}',
+                            : '${AppConstants.currencySymbol}${_deliveryFee.toStringAsFixed(2)}',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
@@ -2020,7 +2353,7 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
                               fontSize: 13, color: AppColors.primaryGreen),
                         ),
                         Text(
-                          '-\$${_discountAmount.toStringAsFixed(2)}',
+                          '-${AppConstants.currencySymbol}${_discountAmount.toStringAsFixed(2)}',
                           style: const TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -2051,7 +2384,7 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
                   ),
                 ),
                 Text(
-                  '\$${_finalTotal.toStringAsFixed(2)}',
+                  '${AppConstants.currencySymbol}${_finalTotal.toStringAsFixed(2)}',
                   style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
@@ -2146,7 +2479,7 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
                         ),
                         const SizedBox(width: 10),
                         Text(
-                          'Pay with GPay • \$${_finalTotal.toStringAsFixed(2)}',
+                          'Pay with GPay • ${AppConstants.currencySymbol}${_finalTotal.toStringAsFixed(2)}',
                           style: const TextStyle(
                             fontSize: 17,
                             fontWeight: FontWeight.bold,
@@ -2166,7 +2499,7 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          '(\$${_finalTotal.toStringAsFixed(2)})',
+                          '(${AppConstants.currencySymbol}${_finalTotal.toStringAsFixed(2)})',
                           style: const TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.normal,
@@ -2444,10 +2777,11 @@ class _CheckoutBottomSheetState extends State<CheckoutBottomSheet> {
                       Wrap(
                         spacing: 8,
                         children: [
+                          '@cnrb',
                           '@okhdfcbank',
-                          '@okaxis',
                           '@oksbi',
-                          '@okicici'
+                          '@okicici',
+                          '@paytm',
                         ].map((handle) {
                           return ActionChip(
                             label: Text(handle,
